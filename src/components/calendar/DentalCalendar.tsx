@@ -9,13 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
   Plus,
   Clock,
   User,
@@ -24,22 +17,26 @@ import {
   Search,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { Appointment, Patient } from "@/types/patient";
-import { AppointmentDetailsModal } from "./AppointmentModals";
-import { NewAppointmentModal } from "./AppointmentModals";
-const localizer = momentLocalizer(moment);
+import {
+  getAppointments,
+  getPatients,
+  Patient,
+  Appointment,
+} from "@/lib/firebase/db";
+import {
+  CalendarEvent,
+  CalendarDoctor,
+  appointmentToCalendarEvent,
+  getAppointmentStatusStyle,
+  getAppointmentStatusLabel,
+  getAppointmentTypeLabel,
+} from "@/types/calendar";
+import {
+  AppointmentDetailsModal,
+  NewAppointmentModal,
+} from "./AppointmentModals";
 
-interface CalendarEvent {
-  id: string;
-  title: string;
-  start: Date;
-  end: Date;
-  resource: {
-    appointment: Appointment;
-    patient: Patient;
-    doctor: any;
-  };
-}
+const localizer = momentLocalizer(moment);
 
 interface DentalCalendarProps {
   doctorId?: string; // Filter by specific doctor
@@ -60,32 +57,100 @@ export const DentalCalendar: React.FC<DentalCalendarProps> = ({
   const [loading, setLoading] = useState(true);
   const [showNewAppointment, setShowNewAppointment] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<SlotInfo | null>(null);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  // Fetch appointments based on current view and filters
+  // Fetch appointments and patients based on current view and filters
   useEffect(() => {
-    fetchAppointments();
+    fetchCalendarData();
   }, [currentDate, currentView, doctorId]);
 
-  const fetchAppointments = async () => {
+  const fetchCalendarData = async () => {
     setLoading(true);
+    setError(null);
+
     try {
-      // Implementation would fetch from Firebase
-      // const appointments = await getAppointments({
-      //   doctorId,
-      //   startDate: getViewStartDate(currentDate, currentView),
-      //   endDate: getViewEndDate(currentDate, currentView)
-      // });
+      // Calculate date range based on current view
+      const { startDate, endDate } = getViewDateRange(currentDate, currentView);
+
+      // Fetch appointments and patients in parallel
+      const [appointments, allPatients] = await Promise.all([
+        getAppointments(startDate, endDate, doctorId),
+        getPatients(),
+      ]);
+
+      setPatients(allPatients);
 
       // Transform appointments to calendar events
-      // setEvents(transformAppointmentsToEvents(appointments));
+      const calendarEvents = appointments
+        .filter((appointment) => appointment.id) // Ensure appointment has ID
+        .map((appointment) => {
+          const patient = allPatients.find(
+            (p) => p.id === appointment.patientId
+          );
+          if (!patient) {
+            console.warn(`Patient not found for appointment ${appointment.id}`);
+            return null;
+          }
 
-      // Sample data for now
-      setEvents(getSampleEvents());
+          // Create doctor object (in a real app, you'd fetch this from a doctors collection)
+          const doctor: CalendarDoctor = {
+            id: appointment.doctorId,
+            name: getDoctorName(appointment.doctorId),
+            email: `${appointment.doctorId}@clinic.com`,
+          };
+
+          return appointmentToCalendarEvent(appointment, patient, doctor);
+        })
+        .filter((event): event is CalendarEvent => event !== null);
+
+      setEvents(calendarEvents);
     } catch (error) {
-      console.error("Error fetching appointments:", error);
+      console.error("Error fetching calendar data:", error);
+      setError("Error al cargar los datos del calendario");
     } finally {
       setLoading(false);
     }
+  };
+
+  const getViewDateRange = (date: Date, view: View) => {
+    const start = moment(date);
+    const end = moment(date);
+
+    switch (view) {
+      case "month":
+        return {
+          startDate: start.startOf("month").toDate(),
+          endDate: end.endOf("month").toDate(),
+        };
+      case "week":
+        return {
+          startDate: start.startOf("week").toDate(),
+          endDate: end.endOf("week").toDate(),
+        };
+      case "day":
+        return {
+          startDate: start.startOf("day").toDate(),
+          endDate: end.endOf("day").toDate(),
+        };
+      default:
+        return {
+          startDate: start.startOf("week").toDate(),
+          endDate: end.endOf("week").toDate(),
+        };
+    }
+  };
+
+  const getDoctorName = (doctorId: string): string => {
+    // In a real app, you'd fetch this from a doctors collection
+    // For now, return a formatted name
+    const doctorNames: Record<string, string> = {
+      dr_smith: "Dr. Smith",
+      dr_garcia: "Dr. García",
+      dr_martinez: "Dr. Martínez",
+    };
+
+    return doctorNames[doctorId] || `Dr. ${doctorId}`;
   };
 
   const handleSelectSlot = (slotInfo: SlotInfo) => {
@@ -101,33 +166,11 @@ export const DentalCalendar: React.FC<DentalCalendarProps> = ({
 
   const getEventStyle = (event: CalendarEvent) => {
     const appointment = event.resource.appointment;
-
-    let backgroundColor = "#3174ad"; // default blue
-
-    switch (appointment.status) {
-      case "scheduled":
-        backgroundColor = "#3174ad"; // blue
-        break;
-      case "confirmed":
-        backgroundColor = "#10b981"; // green
-        break;
-      case "in_progress":
-        backgroundColor = "#f59e0b"; // amber
-        break;
-      case "completed":
-        backgroundColor = "#6b7280"; // gray
-        break;
-      case "cancelled":
-        backgroundColor = "#ef4444"; // red
-        break;
-      case "no_show":
-        backgroundColor = "#dc2626"; // dark red
-        break;
-    }
+    const statusStyle = getAppointmentStatusStyle(appointment.status);
 
     return {
       style: {
-        backgroundColor,
+        backgroundColor: statusStyle.backgroundColor,
         borderRadius: "6px",
         opacity: appointment.status === "cancelled" ? 0.6 : 1,
         color: "white",
@@ -144,10 +187,10 @@ export const DentalCalendar: React.FC<DentalCalendarProps> = ({
       <div className="p-1">
         <div className="font-semibold text-xs truncate">{patient.fullName}</div>
         <div className="text-xs opacity-90 truncate">
-          {appointment.type.replace("_", " ")}
+          {getAppointmentTypeLabel(appointment.type)}
         </div>
         <div className="text-xs opacity-75">
-          {moment(appointment.appointmentDate).format("h:mm A")}
+          {moment(appointment.appointmentDate.toDate()).format("h:mm A")}
         </div>
       </div>
     );
@@ -173,7 +216,7 @@ export const DentalCalendar: React.FC<DentalCalendarProps> = ({
               size="sm"
               onClick={() => onNavigate("TODAY")}
             >
-              Today
+              Hoy
             </Button>
             <Button
               variant="outline"
@@ -194,7 +237,11 @@ export const DentalCalendar: React.FC<DentalCalendarProps> = ({
                 size="sm"
                 onClick={() => onView(viewType)}
               >
-                {viewType.charAt(0).toUpperCase() + viewType.slice(1)}
+                {viewType === "month"
+                  ? "Mes"
+                  : viewType === "week"
+                  ? "Semana"
+                  : "Día"}
               </Button>
             ))}
           </div>
@@ -205,7 +252,7 @@ export const DentalCalendar: React.FC<DentalCalendarProps> = ({
               className="ml-4"
             >
               <Plus className="h-4 w-4 mr-2" />
-              New Appointment
+              Nueva Cita
             </Button>
           )}
         </div>
@@ -218,6 +265,26 @@ export const DentalCalendar: React.FC<DentalCalendarProps> = ({
       <Card>
         <CardContent className="flex items-center justify-center h-96">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center h-96">
+          <div className="text-center">
+            <div className="text-red-500 mb-2">⚠️</div>
+            <p className="text-gray-600">{error}</p>
+            <Button
+              onClick={fetchCalendarData}
+              className="mt-4"
+              variant="outline"
+            >
+              Reintentar
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );
@@ -257,6 +324,21 @@ export const DentalCalendar: React.FC<DentalCalendarProps> = ({
                   "h:mm A"
                 )}`,
             }}
+            messages={{
+              allDay: "Todo el día",
+              previous: "Anterior",
+              next: "Siguiente",
+              today: "Hoy",
+              month: "Mes",
+              week: "Semana",
+              day: "Día",
+              agenda: "Agenda",
+              date: "Fecha",
+              time: "Hora",
+              event: "Evento",
+              noEventsInRange: "No hay citas en este rango de fechas",
+              showMore: (total) => `+ Ver ${total} más`,
+            }}
           />
         </CardContent>
       </Card>
@@ -267,6 +349,7 @@ export const DentalCalendar: React.FC<DentalCalendarProps> = ({
           event={selectedEvent}
           open={!!selectedEvent}
           onClose={() => setSelectedEvent(null)}
+          onUpdate={fetchCalendarData}
         />
       )}
 
@@ -279,90 +362,127 @@ export const DentalCalendar: React.FC<DentalCalendarProps> = ({
             setSelectedSlot(null);
           }}
           selectedSlot={selectedSlot}
-          onSuccess={fetchAppointments}
+          onSuccess={fetchCalendarData}
         />
       )}
 
       {/* Calendar Legend */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Appointment Status Legend</CardTitle>
+          <CardTitle className="text-sm">Estados de Citas</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3">
             <div className="flex items-center space-x-2">
               <div className="w-4 h-4 bg-blue-500 rounded"></div>
-              <span className="text-sm">Scheduled</span>
+              <span className="text-sm">Programada</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-4 h-4 bg-green-500 rounded"></div>
-              <span className="text-sm">Confirmed</span>
+              <span className="text-sm">Confirmada</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-4 h-4 bg-amber-500 rounded"></div>
-              <span className="text-sm">In Progress</span>
+              <span className="text-sm">En Progreso</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-4 h-4 bg-gray-500 rounded"></div>
-              <span className="text-sm">Completed</span>
+              <span className="text-sm">Completada</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-4 h-4 bg-red-500 rounded"></div>
-              <span className="text-sm">Cancelled</span>
+              <span className="text-sm">Cancelada</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-4 h-4 bg-red-700 rounded"></div>
-              <span className="text-sm">No Show</span>
+              <span className="text-sm">No se presentó</span>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Quick Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600">Citas Hoy</p>
+                <p className="text-2xl font-bold">
+                  {
+                    events.filter((event) =>
+                      moment(event.start).isSame(moment(), "day")
+                    ).length
+                  }
+                </p>
+              </div>
+              <CalendarIcon className="h-8 w-8 text-blue-500" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600">Esta Semana</p>
+                <p className="text-2xl font-bold">
+                  {
+                    events.filter((event) =>
+                      moment(event.start).isSame(moment(), "week")
+                    ).length
+                  }
+                </p>
+              </div>
+              <Clock className="h-8 w-8 text-green-500" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600">Confirmadas</p>
+                <p className="text-2xl font-bold">
+                  {
+                    events.filter(
+                      (event) =>
+                        event.resource.appointment.status === "confirmed"
+                    ).length
+                  }
+                </p>
+              </div>
+              <User className="h-8 w-8 text-purple-500" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600">Pacientes Únicos</p>
+                <p className="text-2xl font-bold">
+                  {
+                    new Set(events.map((event) => event.resource.patient.id))
+                      .size
+                  }
+                </p>
+              </div>
+              <User className="h-8 w-8 text-amber-500" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };
 
-// Sample data for development
-const getSampleEvents = (): CalendarEvent[] => {
-  const now = new Date();
-  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-
-  return [
-    {
-      id: "1",
-      title: "John Doe - Cleaning",
-      start: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0),
-      end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0),
-      resource: {
-        appointment: {
-          id: "1",
-          patientId: "p1",
-          doctorId: "d1",
-          appointmentDate: new Date(),
-          duration: 60,
-          type: "cleaning",
-          status: "confirmed",
-          reasonForVisit: "Regular cleaning",
-          reminders: [],
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          createdBy: "staff1",
-        },
-        patient: {
-          id: "p1",
-          fullName: "John Doe",
-          email: "john@example.com",
-          phone: "555-1234",
-        } as Patient,
-        doctor: { name: "Dr. Smith" },
-      },
-    },
-  ];
-};
-
-// Additional components would include:
-// - AppointmentDetailsModal
-// - NewAppointmentModal
-// - AppointmentForm
-// These will be implemented in subsequent phases
-
 export default DentalCalendar;
+
+// Note: Make sure to install moment if not already installed:
+// npm install moment @types/moment
+
+// Also ensure react-big-calendar is properly installed:
+// npm install react-big-calendar @types/react-big-calendar

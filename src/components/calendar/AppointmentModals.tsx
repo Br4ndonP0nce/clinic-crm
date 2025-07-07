@@ -13,6 +13,12 @@ import {
   Appointment,
 } from "@/lib/firebase/db";
 import {
+  CalendarEvent,
+  getAppointmentStatusStyle,
+  getAppointmentStatusLabel,
+  getAppointmentTypeLabel,
+} from "@/types/calendar";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -52,18 +58,6 @@ import {
 // APPOINTMENT DETAILS MODAL
 // ============================================================================
 
-interface CalendarEvent {
-  id: string;
-  title: string;
-  start: Date;
-  end: Date;
-  resource: {
-    appointment: Appointment;
-    patient: Patient;
-    doctor: any;
-  };
-}
-
 interface AppointmentDetailsModalProps {
   event: CalendarEvent | null;
   open: boolean;
@@ -91,25 +85,6 @@ export const AppointmentDetailsModal: React.FC<
 
   const { appointment, patient } = event.resource;
 
-  const getStatusColor = (status: Appointment["status"]) => {
-    switch (status) {
-      case "scheduled":
-        return "bg-blue-100 text-blue-800";
-      case "confirmed":
-        return "bg-green-100 text-green-800";
-      case "in_progress":
-        return "bg-amber-100 text-amber-800";
-      case "completed":
-        return "bg-gray-100 text-gray-800";
-      case "cancelled":
-        return "bg-red-100 text-red-800";
-      case "no_show":
-        return "bg-red-200 text-red-900";
-      default:
-        return "bg-gray-100 text-gray-800";
-    }
-  };
-
   const getStatusIcon = (status: Appointment["status"]) => {
     switch (status) {
       case "completed":
@@ -130,7 +105,7 @@ export const AppointmentDetailsModal: React.FC<
       setLoading(true);
       await updateAppointment(appointment.id, {
         status: newStatus,
-        updatedAt: Timestamp.now(), // Fixed: Use Timestamp instead of Date
+        updatedAt: Timestamp.now(),
       });
       onUpdate?.();
       onClose();
@@ -142,7 +117,6 @@ export const AppointmentDetailsModal: React.FC<
   };
 
   const formatDateTime = (date: Date | Timestamp) => {
-    // Handle both Date and Timestamp objects
     const jsDate = date instanceof Date ? date : date.toDate();
     return new Intl.DateTimeFormat("es-MX", {
       weekday: "long",
@@ -153,6 +127,8 @@ export const AppointmentDetailsModal: React.FC<
       minute: "2-digit",
     }).format(jsDate);
   };
+
+  const statusStyle = getAppointmentStatusStyle(appointment.status);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -172,20 +148,8 @@ export const AppointmentDetailsModal: React.FC<
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               {getStatusIcon(appointment.status)}
-              <Badge className={getStatusColor(appointment.status)}>
-                {appointment.status === "scheduled"
-                  ? "Programada"
-                  : appointment.status === "confirmed"
-                  ? "Confirmada"
-                  : appointment.status === "in_progress"
-                  ? "En Progreso"
-                  : appointment.status === "completed"
-                  ? "Completada"
-                  : appointment.status === "cancelled"
-                  ? "Cancelada"
-                  : appointment.status === "no_show"
-                  ? "No se presentó"
-                  : appointment.status}
+              <Badge className={statusStyle.className}>
+                {getAppointmentStatusLabel(appointment.status)}
               </Badge>
             </div>
 
@@ -266,18 +230,8 @@ export const AppointmentDetailsModal: React.FC<
               <Label className="text-sm font-medium text-gray-600">
                 Tipo de Cita
               </Label>
-              <p className="mt-1 capitalize">
-                {appointment.type === "consultation"
-                  ? "Consulta"
-                  : appointment.type === "cleaning"
-                  ? "Limpieza"
-                  : appointment.type === "procedure"
-                  ? "Procedimiento"
-                  : appointment.type === "followup"
-                  ? "Seguimiento"
-                  : appointment.type === "emergency"
-                  ? "Emergencia"
-                  : appointment.type}
+              <p className="mt-1">
+                {getAppointmentTypeLabel(appointment.type)}
               </p>
             </div>
             <div>
@@ -414,7 +368,7 @@ export const AppointmentDetailsModal: React.FC<
           {hasPermission("appointments:write") && (
             <Button
               onClick={() => {
-                /* Navigate to patient profile */
+                window.location.href = `/admin/patients/${patient.id}`;
               }}
             >
               <User className="mr-2 h-4 w-4" />
@@ -453,7 +407,7 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
   const [appointmentData, setAppointmentData] = useState({
     patientId: "",
     doctorId: userProfile?.uid || "",
-    appointmentDate: Timestamp.fromDate(selectedSlot?.start || new Date()), // Fixed: Convert to Timestamp
+    appointmentDate: Timestamp.fromDate(selectedSlot?.start || new Date()),
     duration: 60,
     type: "consultation" as Appointment["type"],
     reasonForVisit: "",
@@ -484,7 +438,7 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
     if (selectedSlot) {
       setAppointmentData((prev) => ({
         ...prev,
-        appointmentDate: Timestamp.fromDate(selectedSlot.start), // Fixed: Convert to Timestamp
+        appointmentDate: Timestamp.fromDate(selectedSlot.start),
       }));
     }
   }, [selectedSlot]);
@@ -515,7 +469,7 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
       setAppointmentData({
         patientId: "",
         doctorId: userProfile.uid,
-        appointmentDate: Timestamp.now(), // ✅ Fixed: Use Timestamp.now() instead of new Date()
+        appointmentDate: Timestamp.now(),
         duration: 60,
         type: "consultation",
         reasonForVisit: "",
