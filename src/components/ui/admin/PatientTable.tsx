@@ -179,7 +179,7 @@ export default function PatientTable({
 
               <TableCell>
                 <span className="text-sm">
-                  {calculateAge(patient.dateOfBirth)} años
+                  {calculateAge(patient.dateOfBirth.toDate())} años
                 </span>
               </TableCell>
 

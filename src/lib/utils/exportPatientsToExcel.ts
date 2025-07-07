@@ -45,7 +45,7 @@ export const exportPatientsToExcel = async (
         'Fecha de Nacimiento': patient.dateOfBirth 
           ? formatDateForExcel(patient.dateOfBirth) 
           : 'N/A',
-        'Edad': calculateAge(patient.dateOfBirth),
+        'Edad': calculateAge(patient.dateOfBirth.toDate()),
         'Género': getGenderLabel(patient.gender),
         'Estado': getStatusLabel(patient.status),
         
@@ -243,7 +243,7 @@ const createPatientSummaryData = (patients: Patient[]) => {
   };
 
   patients.forEach(patient => {
-    const age = calculateAge(patient.dateOfBirth);
+    const age = calculateAge(patient.dateOfBirth.toDate());
     if (age === null) {
       ageGroups.unknown++;
     } else if (age < 18) {

@@ -247,7 +247,7 @@ export default function PatientDetailsPage() {
                 </Badge>
                 <span className="text-sm text-gray-600">
                   {patient.dateOfBirth &&
-                    `${calculateAge(patient.dateOfBirth)} años`}
+                    `${calculateAge(patient.dateOfBirth.toDate())} años`}
                 </span>
                 <span className="text-sm text-gray-600 capitalize">
                   {patient.gender === "prefer_not_to_say"

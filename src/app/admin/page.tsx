@@ -472,7 +472,7 @@ export default function DentalDashboard() {
                             <td className="py-3 text-sm text-gray-600">
                               {patient.dentalHistory.lastVisit
                                 ? new Date(
-                                    patient.dentalHistory.lastVisit
+                                    patient.dentalHistory.lastVisit.toDate()
                                   ).toLocaleDateString("es-MX")
                                 : "Primera visita"}
                             </td>
