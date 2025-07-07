@@ -1,4 +1,4 @@
-// src/lib/firebase/rbac.ts - Updated with new permissions
+// src/lib/firebase/rbac.ts - Updated for Dental Practice
 import { 
   doc, 
   getDoc, 
@@ -17,86 +17,93 @@ import { User } from 'firebase/auth';
 // Define all possible permissions in your system
 export type Permission = 
   | 'dashboard:read'
-  | 'leads:read' 
-  | 'leads:write'
-  | 'leads:delete'
-  | 'sales:read'
-  | 'sales:write'
-  | 'sales:delete'
-  | 'active_members:read'
-  | 'active_members:write'
-  | 'stats:read'
-  | 'content:read'
-  | 'content:write'
+  | 'patients:read' 
+  | 'patients:write'
+  | 'patients:delete'
+  | 'appointments:read'
+  | 'appointments:write'
+  | 'appointments:delete'
+  | 'treatments:read'
+  | 'treatments:write'
+  | 'calendar:read'
+  | 'calendar:write'
+  | 'billing:read'
+  | 'billing:write'
+  | 'ventas:read'
+  | 'ventas:write'
   | 'settings:read'
   | 'settings:write'
-  | 'users:read'
-  | 'users:write'
-  | 'users:delete';
+  | 'staff:read'
+  | 'staff:write'
+  | 'staff:delete';
 
-// Define roles with their permissions
-export type Role = 'super_admin' | 'admin' | 'crm_user' | 'viewer';
+// Define roles for dental practice
+export type Role = 'super_admin' | 'doctor' | 'recepcion' | 'ventas';
 
 export interface RoleDefinition {
   id: Role;
   name: string;
   description: string;
   permissions: Permission[];
-  isSystemRole: boolean; // Cannot be deleted
+  isSystemRole: boolean;
 }
 
-// System roles definition - UPDATED with new permissions
+// System roles definition for dental practice
 export const SYSTEM_ROLES: Record<Role, RoleDefinition> = {
   super_admin: {
     id: 'super_admin',
     name: 'Super Admin',
-    description: 'Acceso completo a todas las funciones y configuraciones',
+    description: 'Acceso completo a todas las funciones del sistema',
     permissions: [
       'dashboard:read',
-      'leads:read', 'leads:write', 'leads:delete',
-      'sales:read', 'sales:write', 'sales:delete',
-      'active_members:read', 'active_members:write',
-      'stats:read',
-      'content:read', 'content:write',
+      'patients:read', 'patients:write', 'patients:delete',
+      'appointments:read', 'appointments:write', 'appointments:delete',
+      'treatments:read', 'treatments:write',
+      'calendar:read', 'calendar:write',
+      'billing:read', 'billing:write',
+      'ventas:read', 'ventas:write',
       'settings:read', 'settings:write',
-      'users:read', 'users:write', 'users:delete'
+      'staff:read', 'staff:write', 'staff:delete'
     ],
     isSystemRole: true
   },
-  admin: {
-    id: 'admin',
-    name: 'Admin',
-    description: 'Acceso completo a todas las funciones excepto gestión de usuarios',
+  doctor: {
+    id: 'doctor',
+    name: 'Doctor',
+    description: 'Acceso completo a pacientes y tratamientos',
     permissions: [
       'dashboard:read',
-      'leads:read', 'leads:write', 'leads:delete',
-      'sales:read', 'sales:write', 'sales:delete',
-      'active_members:read', 'active_members:write',
-      'stats:read',
-      'content:read', 'content:write',
-      'settings:read', 'settings:write'
+      'patients:read', 'patients:write',
+      'appointments:read', 'appointments:write',
+      'treatments:read', 'treatments:write',
+      'calendar:read', 'calendar:write',
+      'billing:read'
     ],
     isSystemRole: true
   },
-  crm_user: {
-    id: 'crm_user',
-    name: 'CRM User',
-    description: 'Acceso a leads, ventas y estadísticas',
+  recepcion: {
+    id: 'recepcion',
+    name: 'Recepción',
+    description: 'Gestión de pacientes, citas y facturación',
     permissions: [
       'dashboard:read',
-      'leads:read', 'leads:write',
-      'sales:read', 'sales:write', // CRM users can create and manage sales
-      'stats:read'
+      'patients:read', 'patients:write',
+      'appointments:read', 'appointments:write',
+      'calendar:read', 'calendar:write',
+      'billing:read', 'billing:write'
     ],
     isSystemRole: true
   },
-  viewer: {
-    id: 'viewer',
-    name: 'Viewer',
-    description: 'Acceso solo de lectura a estadísticas y dashboard',
+  ventas: {
+    id: 'ventas',
+    name: 'Ventas',
+    description: 'Acceso a pacientes y gestión de ventas/comisiones',
     permissions: [
       'dashboard:read',
-      'stats:read'
+      'patients:read', 'patients:write',
+      'appointments:read',
+      'calendar:read',
+      'ventas:read', 'ventas:write'
     ],
     isSystemRole: true
   }
@@ -157,13 +164,11 @@ export const createUserProfile = async (
     if (existingUser.exists()) {
       console.log('📝 Updating existing user');
       
-      // Create update data with proper typing - FIXED TypeScript issue
       const updateData: Record<string, any> = {
         ...userData,
         updatedAt: serverTimestamp()
       };
       
-      // Remove undefined values using Object.entries - FIXED TypeScript issue
       const cleanUpdateData: Record<string, any> = {};
       Object.entries(updateData).forEach(([key, value]) => {
         if (value !== undefined) {
@@ -178,12 +183,11 @@ export const createUserProfile = async (
     } else {
       console.log('🆕 Creating new user profile');
       
-      // Build new user data with explicit field assignment - FIXED role issue
       const newUserData: Record<string, any> = {
         uid: uid,
         email: userData.email || '',
         displayName: userData.displayName || '',
-        role: userData.role || 'viewer', // CRITICAL: Use the provided role first
+        role: userData.role || 'recepcion', // Default to reception role
         isActive: userData.isActive !== undefined ? userData.isActive : true,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -192,7 +196,6 @@ export const createUserProfile = async (
       console.log('📦 Base user data built:', newUserData);
       console.log('🎯 Role assigned as:', newUserData.role);
       
-      // Add optional fields only if they exist
       if (userData.permissions && userData.permissions.length > 0) {
         newUserData.permissions = userData.permissions;
         console.log('🔐 Added custom permissions:', userData.permissions);
@@ -207,16 +210,14 @@ export const createUserProfile = async (
         newUserData.lastLoginAt = userData.lastLoginAt;
       }
       
-      // Final check before saving
       console.log('📤 Final data to be saved to Firestore:');
       console.log(JSON.stringify(newUserData, null, 2));
       console.log('🎯 FINAL ROLE CONFIRMATION:', newUserData.role);
       
-      // Save to Firestore
       await setDoc(userRef, newUserData);
       console.log('✅ User profile saved to Firestore');
       
-      // Verification step - read back what was saved
+      // Verification step
       console.log('🔍 Verifying what was actually saved...');
       const savedDoc = await getDoc(userRef);
       if (savedDoc.exists()) {
@@ -225,13 +226,10 @@ export const createUserProfile = async (
         console.log(JSON.stringify(savedData, null, 2));
         console.log('💾 Verification - Role in database:', savedData.role);
         
-        // Alert if there's a role mismatch
         if (savedData.role !== userData.role) {
           console.error('🚨 CRITICAL: ROLE MISMATCH DETECTED!');
           console.error('   🎯 Expected role:', userData.role);
           console.error('   💾 Actual role in DB:', savedData.role);
-          console.error('   📋 Full userData passed:', userData);
-          console.error('   💿 Full data in DB:', savedData);
         } else {
           console.log('✅ SUCCESS: Role correctly saved as:', savedData.role);
         }
@@ -241,13 +239,6 @@ export const createUserProfile = async (
     }
   } catch (error) {
     console.error('❌ Error in createUserProfile:', error);
-    console.error('❌ Error details:', {
-      uid,
-      userData,
-      createdByUid,
-      errorMessage: error instanceof Error ? error.message : 'Unknown error',
-      errorCode: error instanceof Error && 'code' in error ? error.code : 'unknown'
-    });
     throw error;
   }
 };
@@ -316,7 +307,6 @@ export const deleteUser = async (uid: string): Promise<void> => {
  * Get effective permissions for a user
  */
 export const getUserPermissions = (userProfile: UserProfile): Permission[] => {
-  // If user has custom permissions, use those; otherwise use role permissions
   if (userProfile.permissions && userProfile.permissions.length > 0) {
     return userProfile.permissions;
   }
@@ -350,45 +340,42 @@ export const hasAllPermissions = (userProfile: UserProfile, permissions: Permiss
 };
 
 /**
- * Get routes accessible by user based on permissions - UPDATED with new route
+ * Get routes accessible by user based on permissions
  */
 export const getAccessibleRoutes = (userProfile: UserProfile): string[] => {
   const routes: string[] = [];
   const permissions = getUserPermissions(userProfile);
   
-  // Always add dashboard if user has dashboard:read
   if (permissions.includes('dashboard:read')) {
     routes.push('/admin');
   }
   
-  // Add leads if user has leads:read
-  if (permissions.includes('leads:read')) {
-    routes.push('/admin/leads');
+  if (permissions.includes('patients:read')) {
+    routes.push('/admin/patients');
   }
   
-  // Add active members if user has active_members:read
-  if (permissions.includes('active_members:read')) {
-    routes.push('/admin/activos');
+  if (permissions.includes('calendar:read')) {
+    routes.push('/admin/calendar');
   }
   
-  // Add stats if user has stats:read  
-  if (permissions.includes('stats:read')) {
-    routes.push('/admin/stats');
+  if (permissions.includes('treatments:read')) {
+    routes.push('/admin/treatments');
   }
   
-  // Add content if user has content:read
-  if (permissions.includes('content:read')) {
-    routes.push('/admin/content');
+  if (permissions.includes('billing:read')) {
+    routes.push('/admin/billing');
   }
   
-  // Add settings if user has settings:read
+  if (permissions.includes('ventas:read')) {
+    routes.push('/admin/ventas');
+  }
+  
   if (permissions.includes('settings:read')) {
     routes.push('/admin/settings');
   }
   
-  // Add users if user has users:read
-  if (permissions.includes('users:read')) {
-    routes.push('/admin/users');
+  if (permissions.includes('staff:read')) {
+    routes.push('/admin/staff');
   }
   
   return routes;
@@ -402,19 +389,16 @@ export const initializeDefaultAdmin = async (adminUser: User): Promise<void> => 
     const existingProfile = await getUserProfile(adminUser.uid);
     
     if (!existingProfile) {
-      // Create admin profile with only defined values
       const adminData: Partial<UserProfile> = {
         email: adminUser.email || '',
         role: 'super_admin',
         isActive: true
       };
       
-      // Only add displayName if it exists
       if (adminUser.displayName) {
         adminData.displayName = adminUser.displayName;
       }
       
-      // Don't pass createdByUid since this is the initial admin
       await createUserProfile(adminUser.uid, adminData);
       console.log('Default admin user initialized');
     } else {

@@ -1,191 +1,523 @@
 import { 
-    collection, 
-    addDoc, 
-    updateDoc, 
-    getDoc, 
-    getDocs, 
-    query, 
-    where,
-    orderBy,
-    Timestamp,
-    doc,
-    serverTimestamp
-  } from 'firebase/firestore';
-  import { db } from './config';
+  collection, 
+  addDoc, 
+  updateDoc, 
+  getDoc, 
+  getDocs, 
+  query, 
+  where,
+  orderBy,
+  Timestamp,
+  doc,
+  serverTimestamp,
+  limit as firestoreLimit
+} from 'firebase/firestore';
+import { db } from './config';
+
+// =============================================================================
+// DENTAL PRACTICE MANAGEMENT SYSTEM - DATABASE LAYER
+// =============================================================================
+
+// Core Types for Dental Practice
+export interface Patient {
+  id?: string;
   
-  // Types for our Firestore data
-  export interface Lead {
-    id?: string;
+  // Basic Information
+  firstName: string;
+  lastName: string;
+  fullName: string; // computed: firstName + lastName
+  email: string;
+  phone: string;
+  alternatePhone?: string;
+  dateOfBirth: Timestamp;
+  gender: 'male' | 'female' | 'other' | 'prefer_not_to_say';
+  
+  // Address Information
+  address: {
+    street: string;
+    city: string;
+    state: string;
+    zipCode: string;
+    country: string;
+  };
+  
+  // Emergency Contact
+  emergencyContact: {
     name: string;
-    email: string;
+    relationship: string;
     phone: string;
-    role: string;
-    level: string;
-    software: string;
-    clients: string;
-    investment: string;
-    why: string;
-    status: 'lead' | 'onboarding' | 'sale' | 'rejected';
-    saleId?: string; // Reference to sale document - FIXED: Added this property
-    createdAt?: Timestamp;
-    updatedAt?: Timestamp;
-    agentData?: any; // Data from n8n agent processing
-    notes?: string;
-    assignedTo?: string;
-    statusHistory?: LeadStatusHistory[]; // ADDED: Status history tracking
+  };
+  
+  // Insurance Information
+  insurance: {
+    provider?: string;
+    policyNumber?: string;
+    groupNumber?: string;
+    subscriberName?: string;
+    relationToSubscriber?: string;
+    isActive: boolean;
+  };
+  
+  // Medical History
+  medicalHistory: {
+    allergies: string[];
+    medications: string[];
+    medicalConditions: string[];
+    surgeries: string[];
+    lastPhysicalExam?: Timestamp;
+    primaryPhysician?: string;
+  };
+  
+  // Dental History
+  dentalHistory: {
+    lastVisit?: Timestamp;
+    lastCleaning?: Timestamp;
+    previousDentist?: string;
+    reasonForVisit: string;
+    oralHygiene: 'excellent' | 'good' | 'fair' | 'poor';
+    brushingFrequency: 'twice_daily' | 'daily' | 'few_times_week' | 'rarely';
+    flossingFrequency: 'daily' | 'few_times_week' | 'weekly' | 'rarely' | 'never';
+    currentProblems: string[];
+    painLevel?: number; // 1-10 scale
+  };
+  
+  // Patient Status (evolved from Lead status)
+  status: 'inquiry' | 'scheduled' | 'active' | 'treatment' | 'maintenance' | 'inactive' | 'transferred';
+  
+  // Appointment Preferences
+  preferences: {
+    preferredTimeSlots: string[]; // e.g., ['morning', 'afternoon']
+    preferredDays: string[]; // e.g., ['monday', 'wednesday', 'friday']
+    communicationMethod: 'email' | 'phone' | 'text' | 'app';
+    reminderPreferences: {
+      email: boolean;
+      sms: boolean;
+      days: number; // how many days before appointment
+    };
+  };
+  
+  // Financial Information
+  financial: {
+    paymentMethod: 'insurance' | 'cash' | 'card' | 'payment_plan';
+    balance: number;
+    lastPayment?: {
+      amount: number;
+      date: Timestamp;
+      method: string;
+    };
+  };
+  
+  // System Fields
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  assignedTo?: string; // Doctor/Hygienist ID
+  createdBy: string; // Staff member who added patient
+  notes: string;
+  statusHistory: PatientStatusHistory[];
+  
+  // Consent and Legal (HIPAA Compliance)
+  consents: {
+    treatmentConsent: boolean;
+    privacyPolicy: boolean;
+    marketingEmails: boolean;
+    dateSigned?: Timestamp;
+  };
+}
+
+export interface PatientStatusHistory {
+  id: string;
+  previousStatus: Patient['status'];
+  newStatus: Patient['status'];
+  details: string;
+  performedBy: string;
+  performedAt: Timestamp;
+}
+
+// Appointment Management
+export interface Appointment {
+  id?: string;
+  patientId: string;
+  doctorId: string;
+  appointmentDate: Timestamp;
+  duration: number; // in minutes
+  type: 'consultation' | 'cleaning' | 'procedure' | 'followup' | 'emergency';
+  status: 'scheduled' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
+  reasonForVisit: string;
+  notes?: string;
+  
+  // Preparation instructions
+  preVisitInstructions?: string;
+  
+  // Reminders
+  reminders: {
+    sent: boolean;
+    sentAt?: Timestamp;
+    method: 'email' | 'sms' | 'call';
+  }[];
+  
+  // Room/Equipment assignments
+  room?: string;
+  equipment?: string[];
+  
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  createdBy: string;
+}
+
+// Treatment Records
+export interface TreatmentRecord {
+  id?: string;
+  patientId: string;
+  appointmentId?: string;
+  date: Timestamp;
+  doctorId: string;
+  treatment: {
+    code: string; // Dental procedure code
+    description: string;
+    tooth?: string[]; // Which teeth involved
+    surface?: string[]; // Which surfaces of teeth
+    diagnosis: string;
+    notes: string;
+  };
+  cost: {
+    total: number;
+    insuranceCovered: number;
+    patientPortion: number;
+  };
+  status: 'planned' | 'in_progress' | 'completed' | 'cancelled';
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// =============================================================================
+// FIRESTORE COLLECTIONS
+// =============================================================================
+
+const PATIENTS_COLLECTION = 'patients'; // Renamed from 'leads'
+const APPOINTMENTS_COLLECTION = 'appointments';
+const TREATMENTS_COLLECTION = 'treatments';
+const CONTENT_COLLECTION = 'content'; // Keep existing for website
+
+// =============================================================================
+// PATIENT MANAGEMENT FUNCTIONS (Evolved from Lead functions)
+// =============================================================================
+
+/**
+ * Add a new patient to Firestore
+ */
+export const addPatient = async (patientData: Omit<Patient, 'id' | 'createdAt' | 'updatedAt' | 'fullName'>): Promise<string> => {
+  try {
+    const fullName = `${patientData.firstName} ${patientData.lastName}`.trim();
+    
+    const docRef = await addDoc(collection(db, PATIENTS_COLLECTION), {
+      ...patientData,
+      fullName,
+      status: patientData.status || 'inquiry', // Default status
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    
+    return docRef.id;
+  } catch (error) {
+    console.error('Error adding patient:', error);
+    throw error;
   }
-  export interface LeadStatusHistory {
-    id: string;
-    previousStatus: Lead['status'];
-    newStatus: Lead['status'];
-    details: string;
-    performedBy: string;
-    performedAt: Timestamp;
-  }
-  // Collection references
-  const LEADS_COLLECTION = 'leads';
-  
-  /**
-   * Add a new lead to Firestore
-   */
-  export const addLead = async (leadData: Omit<Lead, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {
-    try {
-      const docRef = await addDoc(collection(db, LEADS_COLLECTION), {
-        ...leadData,
-        status: leadData.status || 'lead', // Default status
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-      
-      return docRef.id;
-    } catch (error) {
-      console.error('Error adding lead:', error);
-      throw error;
-    }
-  };
-  
-  /**
-   * Update a lead's status or data
-   */
-  export const updateLead = async (leadId: string, data: Partial<Lead>, performedBy?: string): Promise<void> => {
-    try {
-      const leadRef = doc(db, LEADS_COLLECTION, leadId);
-      
-      // If status is being updated, add to history
-      if (data.status && performedBy) {
-        const currentLead = await getDoc(leadRef);
-        if (currentLead.exists()) {
-          const currentData = currentLead.data() as Lead;
-          const historyEntry: LeadStatusHistory = {
-            id: `history_${Date.now()}`,
-            previousStatus: currentData.status,
-            newStatus: data.status,
-            details: `Status updated from ${currentData.status} to ${data.status}`,
-            performedBy,
-            performedAt: Timestamp.fromDate(new Date()) // Use Timestamp.fromDate instead of serverTimestamp
-          };
-          
-          data.statusHistory = [...(currentData.statusHistory || []), historyEntry];
-        }
-      }
-      
-      await updateDoc(leadRef, {
-        ...data,
-        updatedAt: serverTimestamp()
-      });
-    } catch (error) {
-      console.error('Error updating lead:', error);
-      throw error;
-    }
-  };
-  
-  /**
-   * Get a single lead by ID
-   */
-  export const getLead = async (leadId: string): Promise<Lead | null> => {
-    try {
-      const leadRef = doc(db, LEADS_COLLECTION, leadId);
-      const leadSnap = await getDoc(leadRef);
-      
-      if (leadSnap.exists()) {
-        return { id: leadSnap.id, ...leadSnap.data() } as Lead;
-      } else {
-        return null;
-      }
-    } catch (error) {
-      console.error('Error getting lead:', error);
-      throw error;
-    }
-  };
-  
-  /**
-   * Get all leads, optionally filtered by status
-   */
-  export const getLeads = async (status?: Lead['status']): Promise<Lead[]> => {
-    try {
-      let q = status
-        ? query(
-            collection(db, LEADS_COLLECTION), 
-            where('status', '==', status),
-            orderBy('createdAt', 'desc')
-          )
-        : query(
-            collection(db, LEADS_COLLECTION),
-            orderBy('createdAt', 'desc')
-          );
-      
-      const querySnapshot = await getDocs(q);
-      const leads: Lead[] = [];
-      
-      querySnapshot.forEach((doc) => {
-        leads.push({ id: doc.id, ...doc.data() } as Lead);
-      });
-      
-      return leads;
-    } catch (error) {
-      console.error('Error getting leads:', error);
-      throw error;
-    }
-  };
-  
-  /**
-   * Search leads by name or email
-   */
-  export const searchLeads = async (searchTerm: string): Promise<Lead[]> => {
-    try {
-      // Note: Firestore doesn't support native text search
-      // For a small dataset, we can fetch all and filter client-side
-      // For production, consider Algolia or similar search service
-      
-      const allLeads = await getLeads();
-      const searchTermLower = searchTerm.toLowerCase();
-      
-      return allLeads.filter(lead => 
-        lead.name.toLowerCase().includes(searchTermLower) ||
-        lead.email.toLowerCase().includes(searchTermLower)
-      );
-    } catch (error) {
-      console.error('Error searching leads:', error);
-      throw error;
-    }
 };
-  
-//CMS
+
+/**
+ * Update a patient's status or data
+ */
+export const updatePatient = async (patientId: string, data: Partial<Patient>, performedBy?: string): Promise<void> => {
+  try {
+    const patientRef = doc(db, PATIENTS_COLLECTION, patientId);
+    
+    // If status is being updated, add to history
+    if (data.status && performedBy) {
+      const currentPatient = await getDoc(patientRef);
+      if (currentPatient.exists()) {
+        const currentData = currentPatient.data() as Patient;
+        const historyEntry: PatientStatusHistory = {
+          id: `history_${Date.now()}`,
+          previousStatus: currentData.status,
+          newStatus: data.status,
+          details: `Status updated from ${currentData.status} to ${data.status}`,
+          performedBy,
+          performedAt: Timestamp.fromDate(new Date())
+        };
+        
+        data.statusHistory = [...(currentData.statusHistory || []), historyEntry];
+      }
+    }
+    
+    // Update fullName if first or last name changed
+    if (data.firstName || data.lastName) {
+      const currentPatient = await getDoc(patientRef);
+      if (currentPatient.exists()) {
+        const currentData = currentPatient.data() as Patient;
+        const firstName = data.firstName || currentData.firstName;
+        const lastName = data.lastName || currentData.lastName;
+        data.fullName = `${firstName} ${lastName}`.trim();
+      }
+    }
+    
+    await updateDoc(patientRef, {
+      ...data,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error updating patient:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get a single patient by ID
+ */
+export const getPatient = async (patientId: string): Promise<Patient | null> => {
+  try {
+    const patientRef = doc(db, PATIENTS_COLLECTION, patientId);
+    const patientSnap = await getDoc(patientRef);
+    
+    if (patientSnap.exists()) {
+      return { id: patientSnap.id, ...patientSnap.data() } as Patient;
+    } else {
+      return null;
+    }
+  } catch (error) {
+    console.error('Error getting patient:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get all patients, optionally filtered by status
+ */
+export const getPatients = async (status?: Patient['status'], limit?: number): Promise<Patient[]> => {
+  try {
+    let q = status
+      ? query(
+          collection(db, PATIENTS_COLLECTION), 
+          where('status', '==', status),
+          orderBy('createdAt', 'desc')
+        )
+      : query(
+          collection(db, PATIENTS_COLLECTION),
+          orderBy('createdAt', 'desc')
+        );
+    
+    if (limit) {
+      q = query(q, firestoreLimit(limit));
+    }
+    
+    const querySnapshot = await getDocs(q);
+    const patients: Patient[] = [];
+    
+    querySnapshot.forEach((doc) => {
+      patients.push({ id: doc.id, ...doc.data() } as Patient);
+    });
+    
+    return patients;
+  } catch (error) {
+    console.error('Error getting patients:', error);
+    throw error;
+  }
+};
+
+/**
+ * Search patients by name, email, or phone
+ */
+export const searchPatients = async (searchTerm: string): Promise<Patient[]> => {
+  try {
+    // Note: Firestore doesn't support native text search
+    // For small datasets, we can fetch all and filter client-side
+    // For production, consider Algolia or similar search service
+    
+    const allPatients = await getPatients();
+    const searchTermLower = searchTerm.toLowerCase();
+    
+    return allPatients.filter(patient => 
+      patient.fullName.toLowerCase().includes(searchTermLower) ||
+      patient.firstName.toLowerCase().includes(searchTermLower) ||
+      patient.lastName.toLowerCase().includes(searchTermLower) ||
+      patient.email.toLowerCase().includes(searchTermLower) ||
+      patient.phone.toLowerCase().includes(searchTermLower)
+    );
+  } catch (error) {
+    console.error('Error searching patients:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get patients by assigned provider (doctor/hygienist)
+ */
+export const getPatientsByProvider = async (providerId: string): Promise<Patient[]> => {
+  try {
+    const q = query(
+      collection(db, PATIENTS_COLLECTION),
+      where('assignedTo', '==', providerId),
+      orderBy('createdAt', 'desc')
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const patients: Patient[] = [];
+    
+    querySnapshot.forEach((doc) => {
+      patients.push({ id: doc.id, ...doc.data() } as Patient);
+    });
+    
+    return patients;
+  } catch (error) {
+    console.error('Error getting patients by provider:', error);
+    throw error;
+  }
+};
+
+// =============================================================================
+// APPOINTMENT MANAGEMENT FUNCTIONS
+// =============================================================================
+
+/**
+ * Add a new appointment
+ */
+export const addAppointment = async (appointmentData: Omit<Appointment, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {
+  try {
+    const docRef = await addDoc(collection(db, APPOINTMENTS_COLLECTION), {
+      ...appointmentData,
+      status: appointmentData.status || 'scheduled',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    
+    return docRef.id;
+  } catch (error) {
+    console.error('Error adding appointment:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get appointments for a specific date range
+ */
+export const getAppointments = async (
+  startDate?: Date, 
+  endDate?: Date, 
+  doctorId?: string,
+  patientId?: string
+): Promise<Appointment[]> => {
+  try {
+    let q = query(collection(db, APPOINTMENTS_COLLECTION));
+    
+    if (startDate && endDate) {
+      q = query(
+        q,
+        where('appointmentDate', '>=', Timestamp.fromDate(startDate)),
+        where('appointmentDate', '<=', Timestamp.fromDate(endDate))
+      );
+    }
+    
+    if (doctorId) {
+      q = query(q, where('doctorId', '==', doctorId));
+    }
+    
+    if (patientId) {
+      q = query(q, where('patientId', '==', patientId));
+    }
+    
+    q = query(q, orderBy('appointmentDate', 'asc'));
+    
+    const querySnapshot = await getDocs(q);
+    const appointments: Appointment[] = [];
+    
+    querySnapshot.forEach((doc) => {
+      appointments.push({ id: doc.id, ...doc.data() } as Appointment);
+    });
+    
+    return appointments;
+  } catch (error) {
+    console.error('Error getting appointments:', error);
+    throw error;
+  }
+};
+
+/**
+ * Update appointment status
+ */
+export const updateAppointment = async (appointmentId: string, data: Partial<Appointment>): Promise<void> => {
+  try {
+    const appointmentRef = doc(db, APPOINTMENTS_COLLECTION, appointmentId);
+    await updateDoc(appointmentRef, {
+      ...data,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error updating appointment:', error);
+    throw error;
+  }
+};
+
+// =============================================================================
+// TREATMENT MANAGEMENT FUNCTIONS
+// =============================================================================
+
+/**
+ * Add a treatment record
+ */
+export const addTreatmentRecord = async (treatmentData: Omit<TreatmentRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {
+  try {
+    const docRef = await addDoc(collection(db, TREATMENTS_COLLECTION), {
+      ...treatmentData,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    
+    return docRef.id;
+  } catch (error) {
+    console.error('Error adding treatment record:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get treatment history for a patient
+ */
+export const getPatientTreatments = async (patientId: string): Promise<TreatmentRecord[]> => {
+  try {
+    const q = query(
+      collection(db, TREATMENTS_COLLECTION),
+      where('patientId', '==', patientId),
+      orderBy('date', 'desc')
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const treatments: TreatmentRecord[] = [];
+    
+    querySnapshot.forEach((doc) => {
+      treatments.push({ id: doc.id, ...doc.data() } as TreatmentRecord);
+    });
+    
+    return treatments;
+  } catch (error) {
+    console.error('Error getting patient treatments:', error);
+    throw error;
+  }
+};
+
+// =============================================================================
+// CONTENT MANAGEMENT (Keep existing functionality)
+// =============================================================================
+
 export interface ContentItem {
   id?: string;
   type: 'text' | 'image' | 'video';
-  section: string; // E.g., 'hero', 'testimonials', 'benefits'
-  key: string;     // E.g., 'title', 'subtitle', 'video_url'
+  section: string;
+  key: string;
   value: string;
-  label: string;   // Human-readable label
+  label: string;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
 }
 
-// Collection reference
-const CONTENT_COLLECTION = 'content';
-
-// Get all content
 export const getAllContent = async (): Promise<ContentItem[]> => {
   try {
     const q = query(
@@ -208,7 +540,6 @@ export const getAllContent = async (): Promise<ContentItem[]> => {
   }
 };
 
-// Get content by section
 export const getContentBySection = async (section: string): Promise<ContentItem[]> => {
   try {
     const q = query(
@@ -231,7 +562,6 @@ export const getContentBySection = async (section: string): Promise<ContentItem[
   }
 };
 
-// Update content
 export const updateContent = async (contentId: string, value: string): Promise<void> => {
   try {
     const contentRef = doc(db, CONTENT_COLLECTION, contentId);
@@ -244,3 +574,17 @@ export const updateContent = async (contentId: string, value: string): Promise<v
     throw error;
   }
 };
+
+// =============================================================================
+// BACKWARD COMPATIBILITY (For gradual migration)
+// =============================================================================
+
+// Keep these aliases for existing code during transition
+export const addLead = addPatient;
+export const getLead = getPatient;
+export const getLeads = getPatients;
+export const updateLead = updatePatient;
+export const searchLeads = searchPatients;
+
+// Export legacy Lead type as alias
+export type Lead = Patient;
