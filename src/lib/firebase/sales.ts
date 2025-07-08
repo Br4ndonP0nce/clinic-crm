@@ -1,4 +1,4 @@
-// src/lib/firebase/sales.ts - UPDATED with access management functions
+// src/lib/firebase/sales.ts - UPDATED for Dental Practice
 import { 
   collection, 
   doc, 
@@ -14,15 +14,22 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db } from './config';
-import { Sale, PaymentProof, SaleStatusHistory, calculateAccessEndDate } from '@/types/sales';
-import { updateLead } from './db';
+import { 
+  Sale, 
+  PaymentProof, 
+  SaleStatusHistory, 
+  calculateAccessEndDate,
+  PaymentRecord,
+  PaymentMethod 
+} from '@/types/sales';
+import { updatePatient } from './db'; // Updated from updateLead
 
 const SALES_COLLECTION = 'sales';
 
 /**
- * Create a new sale when lead status is updated to "sale"
+ * Create a new sale when patient status is updated to "sale"
  */
-export const createSale = async (saleData: Omit<Sale, 'id' | 'createdAt' | 'updatedAt' | 'statusHistory'>): Promise<string> => {
+export const createSale = async (saleData: Omit<Sale, 'id' | 'createdAt' | 'updatedAt' | 'statusHistory' | 'paymentProofs'>): Promise<string> => {
   try {
     const batch = writeBatch(db);
     
@@ -42,6 +49,7 @@ export const createSale = async (saleData: Omit<Sale, 'id' | 'createdAt' | 'upda
     
     const sale: Omit<Sale, 'id'> = {
       ...saleData,
+      paymentProofs: [], // Initialize empty array
       statusHistory: [initialHistory],
       createdAt: serverTimestamp() as any,
       updatedAt: serverTimestamp() as any
@@ -49,13 +57,16 @@ export const createSale = async (saleData: Omit<Sale, 'id' | 'createdAt' | 'upda
 
     batch.set(saleRef, sale);
 
-    // Update lead with sale reference
-    const leadRef = doc(db, 'leads', saleData.leadId);
-    batch.update(leadRef, {
-      saleId: saleId,
-      status: 'sale',
-      updatedAt: serverTimestamp()
-    });
+    // Update patient with sale reference (using patientId instead of leadId)
+    const patientId = saleData.patientId || saleData.leadId;
+    if (patientId) {
+      const patientRef = doc(db, 'patients', patientId);
+      batch.update(patientRef, {
+        saleId: saleId,
+        status: 'active', // Update patient status to active when sale is created
+        updatedAt: serverTimestamp()
+      });
+    }
 
     await batch.commit();
     return saleId;
@@ -105,7 +116,7 @@ export const addPaymentProof = async (
 
     // Update sale
     await updateDoc(saleRef, {
-      paymentProofs: [...sale.paymentProofs, newProof],
+      paymentProofs: [...(sale.paymentProofs || []), newProof],
       paidAmount: newPaidAmount,
       statusHistory: [...sale.statusHistory, historyEntry],
       updatedAt: serverTimestamp()
@@ -117,7 +128,138 @@ export const addPaymentProof = async (
 };
 
 /**
- * Grant access to course (admin/super_admin only)
+ * Add payment record (new structured approach)
+ */
+export const addPaymentRecord = async (
+  saleId: string,
+  paymentData: Omit<PaymentRecord, 'id' | 'date'>,
+  performedBy: string
+): Promise<void> => {
+  try {
+    const saleRef = doc(db, SALES_COLLECTION, saleId);
+    const saleSnap = await getDoc(saleRef);
+    
+    if (!saleSnap.exists()) {
+      throw new Error('Sale not found');
+    }
+
+    const sale = saleSnap.data() as Sale;
+    
+    // Create new payment record
+    const newPayment: PaymentRecord = {
+      ...paymentData,
+      id: `payment_${Date.now()}`,
+      date: Timestamp.now()
+    };
+
+    // Update paid amount
+    const newPaidAmount = sale.paidAmount + paymentData.amount;
+    
+    // Create status history entry
+    const historyEntry: SaleStatusHistory = {
+      id: `history_${Date.now()}`,
+      action: 'payment_added',
+      details: `Payment of $${paymentData.amount} via ${paymentData.method}`,
+      amount: paymentData.amount,
+      performedBy,
+      performedAt: new Date()
+    };
+
+    // Update sale
+    await updateDoc(saleRef, {
+      payments: [...(sale.payments || []), newPayment],
+      paidAmount: newPaidAmount,
+      statusHistory: [...sale.statusHistory, historyEntry],
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error adding payment record:', error);
+    throw error;
+  }
+};
+
+/**
+ * Start treatment/service (replaces grantCourseAccess for dental practice)
+ */
+export const startTreatment = async (
+  saleId: string, 
+  startDate: Date,
+  startedBy: string,
+  notes?: string
+): Promise<void> => {
+  try {
+    const saleRef = doc(db, SALES_COLLECTION, saleId);
+    
+    const historyEntry: SaleStatusHistory = {
+      id: `history_${Date.now()}`,
+      action: 'treatment_started',
+      details: `Treatment started on ${startDate.toLocaleDateString()}${notes ? `: ${notes}` : ''}`,
+      performedBy: startedBy,
+      performedAt: new Date()
+    };
+
+    const saleSnap = await getDoc(saleRef);
+    if (!saleSnap.exists()) {
+      throw new Error('Sale not found');
+    }
+
+    const sale = saleSnap.data() as Sale;
+
+    await updateDoc(saleRef, {
+      serviceCompleted: false,
+      serviceStartDate: Timestamp.fromDate(startDate),
+      // Keep legacy fields for backward compatibility
+      accessGranted: true,
+      statusHistory: [...sale.statusHistory, historyEntry],
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error starting treatment:', error);
+    throw error;
+  }
+};
+
+/**
+ * Complete treatment/service
+ */
+export const completeTreatment = async (
+  saleId: string,
+  completionDate: Date,
+  completedBy: string,
+  notes?: string
+): Promise<void> => {
+  try {
+    const saleRef = doc(db, SALES_COLLECTION, saleId);
+    
+    const historyEntry: SaleStatusHistory = {
+      id: `history_${Date.now()}`,
+      action: 'treatment_completed',
+      details: `Treatment completed on ${completionDate.toLocaleDateString()}${notes ? `: ${notes}` : ''}`,
+      performedBy: completedBy,
+      performedAt: new Date()
+    };
+
+    const saleSnap = await getDoc(saleRef);
+    if (!saleSnap.exists()) {
+      throw new Error('Sale not found');
+    }
+
+    const sale = saleSnap.data() as Sale;
+
+    await updateDoc(saleRef, {
+      serviceCompleted: true,
+      serviceEndDate: Timestamp.fromDate(completionDate),
+      statusHistory: [...sale.statusHistory, historyEntry],
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error completing treatment:', error);
+    throw error;
+  }
+};
+
+/**
+ * Grant course access (legacy function - kept for backward compatibility)
  */
 export const grantCourseAccess = async (
   saleId: string, 
@@ -145,7 +287,7 @@ export const grantCourseAccess = async (
 
     await updateDoc(saleRef, {
       accessGranted: true,
-      accessStartDate: Timestamp.fromDate(startDate),
+      serviceStartDate: Timestamp.fromDate(startDate),
       accessEndDate: Timestamp.fromDate(endDate),
       statusHistory: [...sale.statusHistory, historyEntry],
       updatedAt: serverTimestamp()
@@ -158,7 +300,6 @@ export const grantCourseAccess = async (
 
 /**
  * Update course access dates (admin/super_admin only)
- * NEW FUNCTION
  */
 export const updateCourseAccess = async (
   saleId: string, 
@@ -185,7 +326,7 @@ export const updateCourseAccess = async (
     const sale = saleSnap.data() as Sale;
 
     await updateDoc(saleRef, {
-      accessStartDate: Timestamp.fromDate(newStartDate),
+      serviceStartDate: Timestamp.fromDate(newStartDate),
       accessEndDate: Timestamp.fromDate(newEndDate),
       statusHistory: [...sale.statusHistory, historyEntry],
       updatedAt: serverTimestamp()
@@ -198,7 +339,6 @@ export const updateCourseAccess = async (
 
 /**
  * Revoke course access (admin/super_admin only)
- * NEW FUNCTION
  */
 export const revokeCourseAccess = async (
   saleId: string,
@@ -225,7 +365,7 @@ export const revokeCourseAccess = async (
 
     await updateDoc(saleRef, {
       accessGranted: false,
-      accessStartDate: null,
+      serviceStartDate: null,
       accessEndDate: null,
       statusHistory: [...sale.statusHistory, historyEntry],
       updatedAt: serverTimestamp()
@@ -279,17 +419,23 @@ export const grantPaymentExemption = async (
  * Get all sales (with filters)
  */
 export const getSales = async (filters?: {
+  patientId?: string;
   leadId?: string;
   saleUserId?: string;
   product?: Sale['product'];
   accessGranted?: boolean;
+  serviceCompleted?: boolean;
 }): Promise<Sale[]> => {
   try {
     let q = query(collection(db, SALES_COLLECTION), orderBy('createdAt', 'desc'));
     
-    if (filters?.leadId) {
+    // Handle both patientId and leadId for backward compatibility
+    if (filters?.patientId) {
+      q = query(q, where('patientId', '==', filters.patientId));
+    } else if (filters?.leadId) {
       q = query(q, where('leadId', '==', filters.leadId));
     }
+    
     if (filters?.saleUserId) {
       q = query(q, where('saleUserId', '==', filters.saleUserId));
     }
@@ -298,6 +444,9 @@ export const getSales = async (filters?: {
     }
     if (filters?.accessGranted !== undefined) {
       q = query(q, where('accessGranted', '==', filters.accessGranted));
+    }
+    if (filters?.serviceCompleted !== undefined) {
+      q = query(q, where('serviceCompleted', '==', filters.serviceCompleted));
     }
 
     const snapshot = await getDocs(q);
@@ -327,12 +476,19 @@ export const getSale = async (saleId: string): Promise<Sale | null> => {
 };
 
 /**
- * Get sale by lead ID
+ * Get sale by patient ID (updated from leadId)
  */
-export const getSaleByLeadId = async (leadId: string): Promise<Sale | null> => {
+export const getSaleByPatientId = async (patientId: string): Promise<Sale | null> => {
   try {
-    const q = query(collection(db, SALES_COLLECTION), where('leadId', '==', leadId));
-    const snapshot = await getDocs(q);
+    // Try patientId first, then fall back to leadId for backward compatibility
+    let q = query(collection(db, SALES_COLLECTION), where('patientId', '==', patientId));
+    let snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      // Fall back to leadId for backward compatibility
+      q = query(collection(db, SALES_COLLECTION), where('leadId', '==', patientId));
+      snapshot = await getDocs(q);
+    }
     
     if (!snapshot.empty) {
       const doc = snapshot.docs[0];
@@ -340,18 +496,23 @@ export const getSaleByLeadId = async (leadId: string): Promise<Sale | null> => {
     }
     return null;
   } catch (error) {
-    console.error('Error getting sale by lead ID:', error);
+    console.error('Error getting sale by patient ID:', error);
     throw error;
   }
 };
 
 /**
- * Get active members (for /admin/activos route)
- * Returns leads with sales that meet minimum payment requirements
+ * Get sale by lead ID (legacy function - kept for backward compatibility)
  */
-export const getActiveMembers = async (): Promise<Array<Sale & { leadData: any }>> => {
+export const getSaleByLeadId = getSaleByPatientId;
+
+/**
+ * Get active members (for /admin/activos route)
+ * Returns patients with sales that meet minimum payment requirements
+ */
+export const getActiveMembers = async (): Promise<Array<Sale & { patientData: any }>> => {
   try {
-    // Get all sales with "acceso_curso" product
+    // Get all sales with "acceso_curso" product (legacy support)
     const salesQuery = query(
       collection(db, SALES_COLLECTION),
       where('product', '==', 'acceso_curso'),
@@ -367,21 +528,34 @@ export const getActiveMembers = async (): Promise<Array<Sale & { leadData: any }
       return sale.paidAmount >= (sale.totalAmount * 0.5);
     });
     
-    // Get lead data for each qualified sale
-    const activeMembersWithLeadData = await Promise.all(
-      qualifiedSales.map(async (sale) => {
-        const leadRef = doc(db, 'leads', sale.leadId);
-        const leadSnap = await getDoc(leadRef);
-        const leadData = leadSnap.exists() ? leadSnap.data() : null;
+    // Get patient data for each qualified sale
+    const activeMembersPromises = qualifiedSales.map(async (sale) => {
+      try {
+        const patientId = sale.patientId || sale.leadId;
+        if (!patientId) return null;
+        
+        const patientRef = doc(db, 'patients', patientId);
+        const patientSnap = await getDoc(patientRef);
+        const patientData = patientSnap.exists() ? patientSnap.data() : null;
+        
+        if (!patientData) return null;
         
         return {
           ...sale,
-          leadData
-        };
-      })
-    );
+          patientData
+        } as Sale & { patientData: any };
+      } catch (error) {
+        console.error('Error fetching patient data for sale:', sale.id, error);
+        return null;
+      }
+    });
     
-    return activeMembersWithLeadData.filter(member => member.leadData !== null);
+    const activeMembersWithPatientData = await Promise.all(activeMembersPromises);
+    
+    // Filter out null values and ensure type safety
+    return activeMembersWithPatientData.filter((member): member is Sale & { patientData: any } => 
+      member !== null && member.patientData !== null
+    );
   } catch (error) {
     console.error('Error getting active members:', error);
     throw error;

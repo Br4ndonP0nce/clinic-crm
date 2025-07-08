@@ -1,6 +1,5 @@
 // src/types/sales.ts - Complete Sales System for Dental Practice
-import { Timestamp } from 'firebase/firestore';// src/types/sales.ts - Updated for Dental Practice
-
+import { Timestamp } from 'firebase/firestore';
 
 export interface Sale {
   id?: string;
@@ -39,14 +38,48 @@ export interface Sale {
   
   // Payment Tracking
   payments?: PaymentRecord[];
+  paymentProofs: PaymentProof[];  // Add this back for compatibility
+  
+  // Status History - ADD THIS BACK
+  statusHistory: SaleStatusHistory[];
   
   // Commission Tracking
   commissionRate?: number;        // Commission rate for this sale
   commissionPaid?: boolean;       // Whether commission has been paid
   
+  // Exemption System (for backward compatibility)
+  exemptionGranted?: boolean;
+  exemptionReason?: string;
+  exemptionGrantedBy?: string;
+  
   // Notes and Documentation
   notes?: string;
   attachments?: string[];         // File URLs for contracts, treatment plans, etc.
+}
+
+// Status History Interface
+export interface SaleStatusHistory {
+  id: string;
+  action: 'sale_created' | 'payment_added' | 'access_granted' | 'access_updated' | 'access_revoked' | 'exemption_granted' | 'service_completed' | 'treatment_started' | 'treatment_completed' | 'cancelled';
+  details: string;
+  amount?: number;
+  performedBy: string;
+  performedAt: Date | Timestamp;
+}
+
+// Payment Proof Interface (for backward compatibility)
+export interface PaymentProof {
+  id: string;
+  amount: number;
+  method: PaymentMethod;
+  reference?: string;
+  imageUrl?: string;
+  notes?: string;
+  uploadedBy?: string;
+  uploadedAt: Date | Timestamp;
+  verified?: boolean;
+  verifiedBy?: string;
+  verifiedAt?: Date | Timestamp;
 }
 
 // Dental Products and Services
@@ -106,6 +139,9 @@ export type DentalProduct =
   // Legacy support
   | 'acceso_curso'
   | 'other';
+
+// Add ProductType alias for backward compatibility
+export type ProductType = DentalProduct;
 
 export type DentalCategory = 
   | 'preventive'
@@ -193,6 +229,13 @@ export interface PaymentBreakdown {
   amount: number;
   percentage: number;
 }
+
+// Helper function to calculate access end date (for legacy support)
+export const calculateAccessEndDate = (startDate: Date): Date => {
+  const endDate = new Date(startDate);
+  endDate.setFullYear(endDate.getFullYear() + 1); // 1 year access
+  return endDate;
+};
 
 // Export functions for getting labels
 export const getDentalProductLabel = (product: DentalProduct): string => {
