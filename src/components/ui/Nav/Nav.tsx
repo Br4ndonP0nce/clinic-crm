@@ -28,12 +28,12 @@ const defaultNavItems: NavItem[] = [
 
 const Navbar = ({
   navItems = defaultNavItems,
-  logo = { text: "Demo", href: "/" },
+  logo = { text: "Fleurs", href: "/" },
   socialLinks = { discord: "#", twitter: "#" },
 }: NavbarProps) => {
   return (
     <motion.nav
-      className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-4xl px-4"
+      className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-4xl px-4 "
       initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: "easeOut" }}
@@ -41,7 +41,7 @@ const Navbar = ({
       <div className="flex items-center justify-center">
         {/* Main Navigation */}
         <motion.div
-          className="flex items-center gap-8 bg-white/95 backdrop-blur-md rounded-full px-6 py-3 shadow-lg border border-white/20"
+          className="flex items-center gap-8 bg-white/70 backdrop-blur-md rounded-full px-6 py-3 shadow-lg border border-white/20"
           whileHover={{ scale: 1.02 }}
           transition={{ duration: 0.2 }}
         >
@@ -53,7 +53,7 @@ const Navbar = ({
               transition={{ duration: 0.2 }}
             >
               <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                <span className="text-white text-xs font-bold">e</span>
+                <span className="text-white text-xs font-bold">F</span>
               </div>
               <span className="text-gray-900 font-medium text-lg">
                 {logo.text}
