@@ -19,9 +19,9 @@ interface ScrollRevealSectionProps {
 
 const FeaturesSection = ({
   mainHeading = {
-    line1: "Una serie de integraciones que simplifican",
-    line2: "Tu experiencia de usuario y la de",
-    line3: "Tus clientes",
+    line1: "Tecnología de vanguardia que revoluciona",
+    line2: "Tu experiencia dental y la de",
+    line3: "Nuestros pacientes",
   },
 
   backgroundColor = "bg-gray-50",
@@ -90,16 +90,16 @@ const FeaturesSection = ({
         >
           {[
             {
-              title: "Integraciones Rápidas",
-              desc: "Te armamos tus landing, funnels y más, en dias, no semanas",
+              title: "Diagnóstico Digital Avanzado",
+              desc: "Escáner 3D, radiografías digitales y análisis computarizado para diagnósticos precisos en minutos",
             },
             {
-              title: "Necesitas mas?",
-              desc: "Nos aseguramos de que tu proyecto siempre pueda escalar horizontamente y verticalmente",
+              title: "Tratamientos Mínimamente Invasivos",
+              desc: "Láser dental, sedación consciente y técnicas de última generación para máximo confort",
             },
             {
-              title: "Disminuciones de costo",
-              desc: "Desde sueños pequeños hasta grandes empresas",
+              title: "Experiencia de Lujo",
+              desc: "Desde consultas VIP hasta tratamientos personalizados con los más altos estándares de calidad",
             },
           ].map((item, index) => (
             <motion.div
@@ -111,7 +111,7 @@ const FeaturesSection = ({
               viewport={{ once: true }}
             >
               <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mx-auto mb-4 flex items-center justify-center">
-                <span className="text-white font-bold">{index + 1}</span>
+                <span className="text-white font-bold">🦷</span>
               </div>
               <h4 className="text-lg font-medium text-gray-900 mb-2">
                 {item.title}

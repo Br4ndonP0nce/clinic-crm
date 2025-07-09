@@ -23,7 +23,7 @@ interface NavbarProps {
 }
 
 const defaultNavItems: NavItem[] = [
-  { label: "Join", href: "/join", isSpecial: true },
+  { label: "Agenda", href: "/agenda", isSpecial: true },
 ];
 
 const Navbar = ({

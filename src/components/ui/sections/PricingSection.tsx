@@ -32,32 +32,49 @@ interface ThreeProductsSectionProps {
 const defaultProducts: ProductFeature[] = [
   {
     number: "01",
-    title: "Landing",
+    title: "Odontología Estética",
     description:
-      "Desde landing sites simples de alta conversion, hasta aplicaciones web completas, contruimos experiencias de usuario que capturan la atención y convierten.",
-
-    status: "coming-soon",
+      "Diseño de sonrisa digital, carillas de porcelana, blanqueamiento profesional y tratamientos cosméticos que transforman completamente tu imagen. Utilizamos la más alta tecnología para resultados naturales y duraderos.",
+    buttons: {
+      primary: {
+        text: "Agenda tu cita hoy mismo",
+        href: "/agenda",
+      },
+    },
+    status: "available",
   },
   {
     number: "02",
-    title: "CRM",
+    title: "Implantología Avanzada",
     description:
-      "Un CRM que se adapta a tus necesidades, desde la gestion de clientes y ventas, hasta la automatización de procesos. Todo en un solo lugar.",
-    status: "coming-soon",
+      "Implantes dentales de titanio grado médico con cirugía guiada por computadora. Reemplazos unitarios, rehabilitaciones completas y técnicas de carga inmediata para resultados predecibles y exitosos.",
+    buttons: {
+      primary: {
+        text: "Evaluar mi Caso",
+        href: "/agenda",
+      },
+    },
+    status: "available",
   },
   {
     number: "03",
-    title: "Infraestructura en la nube",
+    title: "Ortodoncia ",
     description:
-      "Escala tu negocio con nuestra infraestructura en la nube, diseñada para soportar el crecimiento y la demanda de tu empresa. Seguridad, velocidad y fiabilidad.",
-    status: "coming-soon",
+      "Alineadores transparentes personalizados y brackets estéticos de última generación. Corregimos malposiciones dentales con tratamientos discretos, cómodos y efectivos para todas las edades.",
+    buttons: {
+      primary: {
+        text: "Simulación Gratuita",
+        href: "/agenda",
+      },
+    },
+    status: "available",
   },
 ];
 
 const PricingSection = ({
   mainHeading = {
-    line1: "Una serie de servicios",
-    line2: "que transforman",
+    line1: "Especialidades médicas que",
+    line2: "transforman sonrisas",
   },
   products = defaultProducts,
   backgroundColor = "bg-gray-50",
@@ -180,7 +197,7 @@ const PricingSection = ({
                         >
                           <div className="w-5 h-5 bg-white rounded flex items-center justify-center">
                             <span className="text-gray-900 text-xs font-bold">
-                              e
+                              🦷
                             </span>
                           </div>
                           {product.buttons.primary.text}
@@ -201,13 +218,13 @@ const PricingSection = ({
                       {product.buttons.secondary && (
                         <motion.a
                           href={product.buttons.secondary.href}
-                          className="inline-flex items-center gap-3 bg-gray-900 text-white px-6 py-3 rounded-lg font-medium hover:bg-gray-800 transition-all duration-200 group"
+                          className="inline-flex items-center gap-3 bg-gray-100 text-gray-900 px-6 py-3 rounded-lg font-medium hover:bg-gray-200 transition-all duration-200 group"
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
                         >
-                          <div className="w-5 h-5 bg-white rounded flex items-center justify-center">
-                            <span className="text-gray-900 text-xs font-bold">
-                              e
+                          <div className="w-5 h-5 bg-gray-900 rounded flex items-center justify-center">
+                            <span className="text-white text-xs font-bold">
+                              🦷
                             </span>
                           </div>
                           {product.buttons.secondary.text}
@@ -227,7 +244,7 @@ const PricingSection = ({
                     </>
                   ) : (
                     <div className="inline-flex items-center px-4 py-2 bg-gray-200 text-gray-600 rounded-lg text-sm font-medium tracking-wider">
-                      COMING SOON
+                      DISPONIBLE
                     </div>
                   )}
                 </motion.div>

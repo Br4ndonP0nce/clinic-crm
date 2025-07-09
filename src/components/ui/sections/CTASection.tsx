@@ -24,21 +24,21 @@ interface CTASectionProps {
 
 const CTASection = ({
   heading = {
-    line1: "Sigue explorando este demo",
-    line2: "Da click en el botón de abajo",
-    line3: "Para explorar el CRM ",
+    line1: "Tu sonrisa perfecta",
+    line2: "te está esperando",
+    line3: "en Fleurs Dental Care",
   },
-  subheading = "Join thousands of developers already building the future of DeFi with Eco's powerful infrastructure.",
+  subheading = "Únete a miles de pacientes que ya han transformado sus vidas con nuestros tratamientos de odontología de alta gama.",
   primaryCTA = {
-    text: "CRM",
-    href: "/admin",
+    text: "Agenda tu Consulta ",
+    href: "/agenda",
   },
 
   features = [
-    "Integration in under 10 minutes",
-    "Multi-chain compatibility",
-    "Enterprise-grade security",
-    "24/7 developer support",
+    "Consulta de evaluación gratuita",
+    "Tecnología de vanguardia certificada",
+    "Financiamiento sin intereses disponible",
+    "Garantía de satisfacción total",
   ],
   backgroundColor = "bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900",
 }: CTASectionProps) => {
@@ -136,6 +136,40 @@ const CTASection = ({
               </>
             )}
           </motion.h2>
+
+          {/* Subheading */}
+          <motion.p
+            className="text-xl text-white/80 max-w-3xl mx-auto leading-relaxed"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.8 }}
+            viewport={{ once: true }}
+          >
+            {subheading}
+          </motion.p>
+        </motion.div>
+
+        {/* Features Grid */}
+        <motion.div
+          className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16"
+          initial={{ opacity: 0, y: 40 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.4 }}
+          viewport={{ once: true }}
+        >
+          {features.map((feature, index) => (
+            <motion.div
+              key={index}
+              className="flex items-center space-x-3 text-white/90"
+              initial={{ opacity: 0, x: -20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.6, delay: 0.1 * index }}
+              viewport={{ once: true }}
+            >
+              <div className="w-2 h-2 bg-gradient-to-r from-blue-400 to-cyan-400 rounded-full flex-shrink-0" />
+              <span className="text-sm">{feature}</span>
+            </motion.div>
+          ))}
         </motion.div>
 
         {/* CTA Buttons */}
@@ -162,7 +196,7 @@ const CTASection = ({
 
             <div className="relative flex items-center gap-4">
               <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center">
-                <span className="text-purple-600 text-sm font-bold">e</span>
+                <span className="text-purple-600 text-sm font-bold">🦷</span>
               </div>
               {primaryCTA.text}
               <motion.span
@@ -182,7 +216,42 @@ const CTASection = ({
             <div className="absolute inset-0 -top-2 -bottom-2 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
           </motion.a>
 
-          {/* Secondary CTA */}
+          {/* Contact Info */}
+          <motion.div
+            className="text-center text-white/70"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 1.2 }}
+            viewport={{ once: true }}
+          >
+            <p className="text-sm mb-1">O llámanos directamente:</p>
+            <a
+              href="tel:+523331234567"
+              className="text-lg font-semibold text-white hover:text-cyan-400 transition-colors"
+            >
+              +52 (33) 3123-4567
+            </a>
+          </motion.div>
+        </motion.div>
+
+        {/* Trust indicators */}
+        <motion.div
+          className="text-center"
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 1.4 }}
+          viewport={{ once: true }}
+        >
+          <p className="text-white/60 text-sm mb-4">
+            Certificados por las mejores instituciones dentales internacionales
+          </p>
+          <div className="flex justify-center items-center space-x-8 opacity-60">
+            <div className="text-xs text-white/50">ISO 9001</div>
+            <div className="w-1 h-1 bg-white/30 rounded-full"></div>
+            <div className="text-xs text-white/50">FDA Aprobado</div>
+            <div className="w-1 h-1 bg-white/30 rounded-full"></div>
+            <div className="text-xs text-white/50">ADA Certificado</div>
+          </div>
         </motion.div>
       </div>
     </div>
