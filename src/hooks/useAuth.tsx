@@ -73,12 +73,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
               window.location.pathname.includes("setup-admin");
 
             if (!isSetupPage) {
+              // Use 'recepcion' as default role for new users in dental practice
+              // This gives them basic access but limits sensitive operations
               await createUserProfile(firebaseUser.uid, {
                 email: firebaseUser.email || "",
                 displayName: firebaseUser.displayName || "",
-                role: "viewer",
+                role: "recepcion", // Default role for dental practice
+                isActive: true,
+                createdAt: new Date(),
+                lastLoginAt: new Date(),
               });
               profile = await getUserProfile(firebaseUser.uid);
+            }
+          } else {
+            // Update last login time for existing users
+            try {
+              await createUserProfile(firebaseUser.uid, {
+                lastLoginAt: new Date(),
+              });
+            } catch (error) {
+              console.warn("Could not update last login time:", error);
             }
           }
 

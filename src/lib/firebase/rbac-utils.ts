@@ -1,3 +1,4 @@
+// src/lib/firebase/rbacUtils.ts - Updated for Dental Practice
 import { UserProfile, Role, Permission, getUserProfile } from './rbac';
 import { updateUserRole } from './rbac';
 import { getAllUsers } from './rbac';
@@ -32,12 +33,8 @@ export const canManageUser = (
     return true;
   }
   
-  // Admins can manage CRM users and viewers
-  if (currentUser.role === 'admin' && 
-      ['crm_user', 'viewer'].includes(targetUser.role)) {
-    return true;
-  }
-  
+  // No other roles can manage users in this dental practice system
+  // Only super_admin has staff management permissions
   return false;
 };
 
@@ -46,10 +43,10 @@ export const canManageUser = (
  */
 export const getRoleLevel = (role: Role): number => {
   const levels = {
-    'viewer': 1,
-    'crm_user': 2,
-    'admin': 3,
-    'super_admin': 4
+    'recepcion': 1,     // Reception - front desk operations
+    'ventas': 2,        // Sales - patient conversion and sales tracking
+    'doctor': 3,        // Doctor - clinical operations and patient care
+    'super_admin': 4    // Super Admin - full system access
   };
   return levels[role] || 0;
 };
@@ -58,17 +55,20 @@ export const getRoleLevel = (role: Role): number => {
  * Check if role A can manage role B
  */
 export const canRoleManageRole = (managerRole: Role, targetRole: Role): boolean => {
-  return getRoleLevel(managerRole) > getRoleLevel(targetRole);
+  // Only super_admin can manage other users in this system
+  return managerRole === 'super_admin' && targetRole !== 'super_admin';
 };
 
 /**
  * Get available roles that current user can assign
  */
 export const getAssignableRoles = (currentUserRole: Role): Role[] => {
-  const currentLevel = getRoleLevel(currentUserRole);
-  const allRoles: Role[] = ['viewer', 'crm_user', 'admin', 'super_admin'];
+  // Only super_admin can assign roles
+  if (currentUserRole === 'super_admin') {
+    return ['recepcion', 'ventas', 'doctor'];
+  }
   
-  return allRoles.filter(role => getRoleLevel(role) < currentLevel);
+  return [];
 };
 
 /**
@@ -77,11 +77,14 @@ export const getAssignableRoles = (currentUserRole: Role): Role[] => {
 export const isValidPermission = (permission: string): permission is Permission => {
   const validPermissions: Permission[] = [
     'dashboard:read',
-    'leads:read', 'leads:write', 'leads:delete',
-    'stats:read',
-    'content:read', 'content:write',
+    'patients:read', 'patients:write', 'patients:delete',
+    'appointments:read', 'appointments:write', 'appointments:delete',
+    'treatments:read', 'treatments:write',
+    'calendar:read', 'calendar:write',
+    'billing:read', 'billing:write',
+    'ventas:read', 'ventas:write',
     'settings:read', 'settings:write',
-    'users:read', 'users:write', 'users:delete'
+    'staff:read', 'staff:write', 'staff:delete'
   ];
   
   return validPermissions.includes(permission as Permission);
@@ -95,13 +98,14 @@ export interface AuditLogEntry {
   userId: string;
   action: string;
   targetUserId?: string;
+  targetPatientId?: string; // Added for dental practice
   details: Record<string, any>;
   timestamp: any;
 }
 
 export const createAuditLog = async (entry: Omit<AuditLogEntry, 'id' | 'timestamp'>): Promise<void> => {
   // Implementation would go here - add to an audit_logs collection
-  console.log('Audit log:', {
+  console.log('Dental Practice Audit log:', {
     ...entry,
     timestamp: new Date().toISOString()
   });
