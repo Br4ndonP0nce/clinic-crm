@@ -2,23 +2,43 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import Image from "next/image";
-import { ChevronRight, ChevronLeft } from "lucide-react";
-import { addLead } from "@/lib/firebase/db";
+import { ChevronRight, ChevronLeft, Calendar, Clock, User, Phone, Mail, Stethoscope } from "lucide-react";
+import { addPatient } from "@/lib/firebase/db";
+import { getAllUsers, UserProfile } from "@/lib/firebase/rbac";
+import { getAppointments } from "@/lib/firebase/db";
+import { Timestamp } from "firebase/firestore";
+import {
+  validateEmail,
+  validateName,
+  validatePhone,
+  generateWhatsAppLink,
+  COUNTRY_VALIDATIONS,
+  PhoneValidationResult,
+} from "@/lib/phoneValidationUtils";
+
+// Dental procedures
+const DENTAL_PROCEDURES = [
+  { id: "consultation", name: "Consulta General", duration: 30, description: "Revisión y diagnóstico" },
+  { id: "cleaning", name: "Limpieza Dental", duration: 60, description: "Profilaxis y limpieza profunda" },
+  { id: "whitening", name: "Blanqueamiento", duration: 90, description: "Blanqueamiento dental profesional" },
+  { id: "filling", name: "Empaste", duration: 45, description: "Reparación de caries" },
+  { id: "extraction", name: "Extracción", duration: 30, description: "Extracción dental simple" },
+  { id: "root_canal", name: "Endodoncia", duration: 120, description: "Tratamiento de conducto" },
+  { id: "crown", name: "Corona", duration: 90, description: "Colocación de corona dental" },
+  { id: "orthodontics", name: "Ortodoncia", duration: 60, description: "Consulta de ortodoncia" },
+  { id: "implant", name: "Implante", duration: 120, description: "Colocación de implante dental" },
+  { id: "emergency", name: "Emergencia", duration: 30, description: "Atención de urgencia dental" }
+];
+
+// Time slots
+const TIME_SLOTS = [
+  "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+  "12:00", "12:30", "14:00", "14:30", "15:00", "15:30",
+  "16:00", "16:30", "17:00", "17:30", "18:00", "18:30"
+];
 
 // Question types
-type QuestionType =
-  | "text"
-  | "email"
-  | "phone"
-  | "select"
-  | "multi-select"
-  | "textarea";
-
-interface Option {
-  id: string;
-  text: string;
-}
+type QuestionType = "text" | "email" | "phone" | "select" | "calendar" | "time";
 
 interface Question {
   id: string;
@@ -26,192 +46,187 @@ interface Question {
   type: QuestionType;
   required: boolean;
   description?: string;
-  options?: Option[];
 }
 
-// Email validation regex - RFC 5322 compliant
-const EMAIL_REGEX =
-  /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-
-// Phone validation - exactly 10 digits
-const PHONE_REGEX = /^\d{8,10}$/;
-
-// Define our form questions
+// Form questions for appointment booking
 const questions: Question[] = [
   {
     id: "name",
-    text: "¿Cuál es tu nombre?",
+    text: "¿Cuál es tu nombre completo?",
     type: "text",
     required: true,
+    description: "Para identificarte en tu cita"
   },
   {
     id: "email",
-    text: "¿Cuál es tu mejor correo?",
+    text: "¿Cuál es tu correo electrónico?",
     type: "email",
     required: true,
-    description: "Con este correo te meteremos a la comunidad si accedes.",
+    description: "Te enviaremos la confirmación de tu cita"
   },
   {
     id: "phone",
     text: "¿Cuál es tu número de WhatsApp?",
     type: "phone",
     required: true,
-    description: "Para contactarte de forma personalizada.",
+    description: "Para contactarte y recordatorios"
   },
   {
-    id: "role",
-    text: "¿Cuál opción es la que mejor te describe?",
+    id: "procedure",
+    text: "¿Qué tipo de tratamiento necesitas?",
     type: "select",
     required: true,
-    options: [
-      {
-        id: "professional",
-        text: "Soy editor/a de video y es mi principal fuente de ingresos",
-      },
-      {
-        id: "part-time",
-        text: "Soy editor/a de video pero mis ingresos provienen de otras fuente",
-      },
-      { id: "beginner", text: "Aun no edito video pero deseo aprender" },
-    ],
+    description: "Selecciona el procedimiento que más se ajuste a tu necesidad"
   },
   {
-    id: "level",
-    text: "¿Qué nivel de edición consideras que tienes?",
+    id: "doctor",
+    text: "¿Con qué doctor te gustaría agendar?",
     type: "select",
     required: true,
-    options: [
-      { id: "expert", text: "Muy alto" },
-      { id: "advanced", text: "Alto" },
-      { id: "intermediate", text: "Medio" },
-      { id: "beginner", text: "Principiante" },
-      { id: "none", text: "No sé nada de edición" },
-    ],
+    description: "Selecciona tu doctor de preferencia"
   },
   {
-    id: "software",
-    text: "¿Con qué programa editas?",
-    type: "select",
+    id: "date",
+    text: "¿Qué día te gustaría agendar?",
+    type: "calendar",
     required: true,
-    options: [
-      { id: "adobe", text: "La Suite de Adobe (Premiere pro o After Effects)" },
-      { id: "davinci", text: "DaVinci Resolve" },
-      { id: "capcut", text: "CapCut" },
-      { id: "filmora", text: "Filmora" },
-      { id: "other", text: "Otro" },
-    ],
+    description: "Selecciona una fecha disponible"
   },
   {
-    id: "clients",
-    text: "¿Cómo consigues clientes de edición cada mes?",
-    type: "select",
+    id: "time",
+    text: "¿A qué hora prefieres tu cita?",
+    type: "time",
     required: true,
-    options: [
-      {
-        id: "outbound",
-        text: "Escribo mensajes a cuentas ofreciendo mis servicios todos los días.",
-      },
-      {
-        id: "inbound",
-        text: "Creo contenido y recibo mensajes de prospectos todos los días.",
-      },
-      {
-        id: "referrals",
-        text: "Conocidos y amigos recomiendan mis servicios.",
-      },
-      {
-        id: "struggling",
-        text: "No tengo clientes, he batallado mucho con eso.",
-      },
-      { id: "not-editor", text: "No me dedico a la edición de video." },
-    ],
-  },
-  {
-    id: "investment",
-    text: "¿Estás dispuesta/o a invertir entre $800 y $1,300 dólares en tu crecimiento exponencial como editor/a?",
-    type: "select",
-    required: true,
-    options: [
-      { id: "yes", text: "Sí, tengo acceso a ese monto y estoy dispuesta/o" },
-      { id: "maybe", text: "No tengo ese monto ahora, pero puedo conseguirlo" },
-      { id: "no", text: "Definitivamente no" },
-    ],
-  },
-  {
-    id: "why",
-    text: "Cuéntanos por qué deberíamos darte acceso a esta formación:",
-    type: "textarea",
-    required: true,
-    description:
-      "La formación es exclusiva y queremos a personas MUY COMPROMETIDAS.",
-  },
+    description: "Selecciona un horario disponible"
+  }
 ];
 
-// Country codes for phone selection
-const countryCodes = [
-  { code: "+93", country: "Afghanistan" },
-  { code: "+355", country: "Albania" },
-  { code: "+213", country: "Algeria" },
-  { code: "+376", country: "Andorra" },
-  { code: "+244", country: "Angola" },
-  { code: "+1", country: "United States" },
-  { code: "+52", country: "Mexico" },
-  { code: "+34", country: "Spain" },
-  { code: "+44", country: "United Kingdom" },
-  { code: "+91", country: "India" },
-  { code: "+86", country: "China" },
-  { code: "+55", country: "Brazil" },
-  { code: "+54", country: "Argentina" },
-  { code: "+57", country: "Colombia" },
-  { code: "+56", country: "Chile" },
-  { code: "+51", country: "Peru" },
-  { code: "+58", country: "Venezuela" },
-  { code: "+502", country: "Guatemala" },
-  { code: "+503", country: "El Salvador" },
-  { code: "+504", country: "Honduras" },
-  { code: "+505", country: "Nicaragua" },
-  { code: "+506", country: "Costa Rica" },
-  { code: "+507", country: "Panama" },
-  { code: "+53", country: "Cuba" },
-  { code: "+1", country: "Dominican Republic" },
-  { code: "+593", country: "Ecuador" },
-];
+// Generate country codes (simplified from original)
+const countryCodes = COUNTRY_VALIDATIONS.filter((c) => c.code !== "+999")
+  .sort((a, b) => {
+    const latinAmericanCodes = ["+52", "+55", "+54", "+57", "+56", "+51"];
+    const aIsLA = latinAmericanCodes.includes(a.code);
+    const bIsLA = latinAmericanCodes.includes(b.code);
+    
+    if (aIsLA && !bIsLA) return -1;
+    if (!aIsLA && bIsLA) return 1;
+    return a.country.localeCompare(b.country);
+  })
+  .map((c) => ({ code: c.code, country: c.country }));
 
-// Validation functions
-const validateEmail = (email: string): boolean => {
-  return EMAIL_REGEX.test(email.trim());
-};
+interface AppointmentData {
+  name: string;
+  email: string;
+  phone: string;
+  procedure: string;
+  doctorId: string;
+  date: string;
+  time: string;
+}
 
-const validatePhone = (phoneNumber: string): boolean => {
-  // Remove country code and spaces to get just the numbers
-  const numbersOnly = phoneNumber.replace(/^\+\d+\s/, "").replace(/\D/g, "");
-  return PHONE_REGEX.test(numbersOnly);
-};
-
-const validateName = (name: string): boolean => {
-  return name.trim().length >= 2;
-};
-
-// Main component
-const TypeformQuiz: React.FC = () => {
+const DentalAppointmentForm: React.FC = () => {
   const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string | null>>({});
-  const [selectedCode, setSelectedCode] = useState("+52"); // Default to Mexico
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [selectedCode, setSelectedCode] = useState("+52");
   const [showCountryDropdown, setShowCountryDropdown] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [phoneValidationError, setPhoneValidationError] = useState<string | null>(null);
+  
+  // Dental-specific state
+  const [doctors, setDoctors] = useState<UserProfile[]>([]);
+  const [availableDates, setAvailableDates] = useState<Date[]>([]);
+  const [availableTimes, setAvailableTimes] = useState<string[]>([]);
+  const [existingAppointments, setExistingAppointments] = useState<any[]>([]);
+  
   const inputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Focus the input field when the question changes
+  // Load doctors on component mount
+  useEffect(() => {
+    const loadDoctors = async () => {
+      try {
+        const allUsers = await getAllUsers();
+        const activeDoctors = allUsers.filter(user => 
+          user.role === "doctor" && user.isActive
+        );
+        setDoctors(activeDoctors);
+      } catch (error) {
+        console.error("Error loading doctors:", error);
+      }
+    };
+    
+    loadDoctors();
+  }, []);
+
+  // Generate available dates (next 7 days, excluding weekends)
+  useEffect(() => {
+    const dates: Date[] = [];
+    const today = new Date();
+    let currentDate = new Date(today);
+    
+    // Skip today if it's too late
+    const currentHour = today.getHours();
+    if (currentHour >= 18) {
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    while (dates.length < 7) {
+      const dayOfWeek = currentDate.getDay();
+      // Skip weekends (0 = Sunday, 6 = Saturday)
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        dates.push(new Date(currentDate));
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    setAvailableDates(dates);
+  }, []);
+
+  // Load existing appointments and calculate available times
+  useEffect(() => {
+    const loadAppointments = async () => {
+      if (answers.doctor && answers.date) {
+        try {
+          const selectedDate = new Date(answers.date);
+          const startOfDay = new Date(selectedDate);
+          startOfDay.setHours(0, 0, 0, 0);
+          const endOfDay = new Date(selectedDate);
+          endOfDay.setHours(23, 59, 59, 999);
+          
+          const appointments = await getAppointments(
+            startOfDay,
+            endOfDay,
+            answers.doctor
+          );
+          
+          setExistingAppointments(appointments);
+          
+          // Calculate available times
+          const bookedTimes = appointments.map(apt => {
+            const aptDate = apt.appointmentDate.toDate();
+            return aptDate.toTimeString().slice(0, 5);
+          });
+          
+          const available = TIME_SLOTS.filter(time => !bookedTimes.includes(time));
+          setAvailableTimes(available);
+          
+        } catch (error) {
+          console.error("Error loading appointments:", error);
+          setAvailableTimes(TIME_SLOTS); // Fallback to all times
+        }
+      }
+    };
+    
+    loadAppointments();
+  }, [answers.doctor, answers.date]);
+
+  // Focus input when question changes
   useEffect(() => {
     setTimeout(() => {
       if (inputRef.current) {
         inputRef.current.focus();
-      } else if (textareaRef.current) {
-        textareaRef.current.focus();
       }
     }, 300);
   }, [currentQuestion]);
@@ -219,21 +234,15 @@ const TypeformQuiz: React.FC = () => {
   // Close country dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setShowCountryDropdown(false);
       }
     };
-
     document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Validation function for current question
+  // Validation
   const validateCurrentQuestion = (): string | null => {
     const currentQ = questions[currentQuestion];
     const currentValue = answers[currentQ.id];
@@ -250,8 +259,9 @@ const TypeformQuiz: React.FC = () => {
           }
           break;
         case "phone":
-          if (!validatePhone(currentValue)) {
-            return "El número de teléfono debe tener exactamente entre 8 y 10 dígitos";
+          const phoneValidation = validatePhone(currentValue, selectedCode);
+          if (!phoneValidation.isValid) {
+            return phoneValidation.error || "Número de teléfono inválido";
           }
           break;
         case "text":
@@ -266,51 +276,61 @@ const TypeformQuiz: React.FC = () => {
   };
 
   // Handle input change
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-  ) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setAnswers({
       ...answers,
       [questions[currentQuestion].id]: e.target.value,
     });
     setError(null);
+    setPhoneValidationError(null);
   };
 
   // Handle option selection
-  const handleOptionSelect = (optionId: string, optionText: string) => {
+  const handleOptionSelect = (optionId: string, optionText?: string) => {
     setAnswers({
       ...answers,
       [questions[currentQuestion].id]: optionId,
-      [`${questions[currentQuestion].id}_text`]: optionText, // Store the display text too
+      [`${questions[currentQuestion].id}_text`]: optionText || optionId,
     });
     setError(null);
 
-    // Auto-advance to next question after selection
+    // Auto-advance for certain question types
     setTimeout(() => {
-      handleNext();
+      if (questions[currentQuestion].type === "select") {
+        handleNext();
+      }
     }, 300);
   };
 
-  // Handle phone input with validation
+  // Handle phone input
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Only allow numbers and limit to 10 digits
-    const value = e.target.value.replace(/\D/g, "");
+    const value = e.target.value.replace(/[^\d]/g, "");
+    const countryValidation = COUNTRY_VALIDATIONS.find(c => c.code === selectedCode);
 
-    // Limit to 10 digits
-    if (value.length <= 10) {
+    if (countryValidation && value.length <= countryValidation.maxLength) {
+      const fullNumber = `${selectedCode} ${value}`;
       setAnswers({
         ...answers,
-        [questions[currentQuestion].id]: `${selectedCode} ${value}`,
+        [questions[currentQuestion].id]: fullNumber,
       });
-    }
 
+      if (value.length >= countryValidation.minLength) {
+        const validation = validatePhone(value, selectedCode);
+        if (!validation.isValid) {
+          setPhoneValidationError(validation.error || null);
+        } else {
+          setPhoneValidationError(null);
+        }
+      } else {
+        setPhoneValidationError(null);
+      }
+    }
     setError(null);
   };
 
-  // Navigate to next question
+  // Navigation
   const handleNext = () => {
     const validationError = validateCurrentQuestion();
-
     if (validationError) {
       setError(validationError);
       return;
@@ -323,93 +343,106 @@ const TypeformQuiz: React.FC = () => {
     }
   };
 
-  // Navigate to previous question
   const handlePrev = () => {
     if (currentQuestion > 0) {
       setCurrentQuestion(currentQuestion - 1);
     }
   };
 
-  // Handle form submission
+  // Submit form
   const handleSubmit = async () => {
     setIsSubmitting(true);
 
-    // Validate all required fields
-    for (let i = 0; i < questions.length; i++) {
-      const question = questions[i];
-      const value = answers[question.id];
-
-      if (question.required && (!value || value === "")) {
-        setError(`Por favor responde la pregunta: ${question.text}`);
-        setCurrentQuestion(i);
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Additional validation for specific fields
-      if (value) {
-        switch (question.type) {
-          case "email":
-            if (!validateEmail(value)) {
-              setError("Por favor ingresa un correo electrónico válido");
-              setCurrentQuestion(i);
-              setIsSubmitting(false);
-              return;
-            }
-            break;
-          case "phone":
-            if (!validatePhone(value)) {
-              setError(
-                "El número de teléfono debe tener exactamente entre 8 y 10 dígitos"
-              );
-              setCurrentQuestion(i);
-              setIsSubmitting(false);
-              return;
-            }
-            break;
-          case "text":
-            if (question.id === "name" && !validateName(value)) {
-              setError("El nombre debe tener al menos 2 caracteres");
-              setCurrentQuestion(i);
-              setIsSubmitting(false);
-              return;
-            }
-            break;
-        }
-      }
-    }
-
     try {
-      // Format the lead data for Firebase
-      const leadData = {
-        name: answers.name || "",
-        email: answers.email || "",
-        phone: answers.phone || "",
-        role: answers.role_text || answers.role || "",
-        level: answers.level_text || answers.level || "",
-        software: answers.software_text || answers.software || "",
-        clients: answers.clients_text || answers.clients || "",
-        investment: answers.investment_text || answers.investment || "",
-        why: answers.why || "",
-        status: "lead" as const, // Initial status
+      // Create patient data
+      const [firstName, ...lastNameParts] = answers.name.split(' ');
+      const lastName = lastNameParts.join(' ') || '';
+      
+      const patientData = {
+        firstName,
+        lastName,
+        fullName: answers.name,
+        email: answers.email,
+        phone: answers.phone,
+        dateOfBirth: Timestamp.fromDate(new Date(1990, 0, 1)), // Default date
+        gender: "prefer_not_to_say" as const,
+        
+        address: {
+          street: "",
+          city: "",
+          state: "",
+          zipCode: "",
+          country: "México"
+        },
+        
+        emergencyContact: {
+          name: "",
+          relationship: "",
+          phone: ""
+        },
+        
+        insurance: {
+          isActive: false
+        },
+        
+        medicalHistory: {
+          allergies: [],
+          medications: [],
+          medicalConditions: [],
+          surgeries: []
+        },
+        
+        dentalHistory: {
+          reasonForVisit: answers.procedure_text || answers.procedure,
+          oralHygiene: "good" as const,
+          brushingFrequency: "twice_daily" as const,
+          flossingFrequency: "daily" as const,
+          currentProblems: []
+        },
+        
+        status: "scheduled" as const,
+        
+        preferences: {
+          preferredTimeSlots: [answers.time],
+          preferredDays: [],
+          communicationMethod: "phone" as const,
+          reminderPreferences: {
+            email: true,
+            sms: true,
+            days: 1
+          }
+        },
+        
+        financial: {
+          paymentMethod: "cash" as const,
+          balance: 0
+        },
+        
+        createdBy: "website_form",
+        notes: `Cita solicitada para: ${answers.procedure_text || answers.procedure}. Fecha preferida: ${answers.date} a las ${answers.time}`,
+        statusHistory: [],
+        
+        consents: {
+          treatmentConsent: true,
+          privacyPolicy: true,
+          marketingEmails: false
+        }
       };
 
-      // Add to Firestore
-      const leadId = await addLead(leadData);
-      console.log("Lead successfully added with ID:", leadId);
+      // Add patient to database
+      const patientId = await addPatient(patientData);
+      console.log("Patient successfully added with ID:", patientId);
 
       setIsSubmitted(true);
     } catch (err) {
-      console.error("Error submitting form:", err);
-      setError(
-        "Hubo un error al enviar el formulario. Por favor intenta de nuevo."
-      );
+      console.error("Error submitting appointment request:", err);
+      setError("Hubo un error al enviar tu solicitud. Por favor intenta de nuevo.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Handle key press to submit on Enter
+  // Handle key press
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -417,36 +450,55 @@ const TypeformQuiz: React.FC = () => {
     }
   };
 
-  // Render the current question
+  // Format date for display
+  const formatDate = (date: Date) => {
+    return date.toLocaleDateString('es-MX', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long'
+    });
+  };
+
+  // Render question content
   const renderQuestion = () => {
     const question = questions[currentQuestion];
 
     switch (question.type) {
       case "text":
+        return (
+          <div className="w-full">
+            <input
+              ref={inputRef}
+              type="text"
+              value={answers[question.id] || ""}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              className="w-full bg-transparent border-b-2 border-white/30 focus:border-white py-2 px-1 text-lg outline-none text-white transition-colors"
+              placeholder="Tu nombre completo"
+            />
+          </div>
+        );
+
       case "email":
         return (
           <div className="w-full">
             <input
               ref={inputRef}
-              type={question.type === "email" ? "email" : "text"}
+              type="email"
               value={answers[question.id] || ""}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              className="w-full bg-transparent border-b-2 border-white/30 focus:border-white py-2 px-1 text-lg outline-none text-white"
-              placeholder={
-                question.type === "email"
-                  ? "ejemplo@correo.com"
-                  : "Escribe tu respuesta aquí..."
-              }
+              className="w-full bg-transparent border-b-2 border-white/30 focus:border-white py-2 px-1 text-lg outline-none text-white transition-colors"
+              placeholder="ejemplo@correo.com"
             />
           </div>
         );
 
       case "phone":
         const phoneValue = answers[question.id] || "";
-        const numbersOnly = phoneValue
-          .replace(`${selectedCode} `, "")
-          .replace(/\D/g, "");
+        const nationalNumber = phoneValue.includes(selectedCode)
+          ? phoneValue.replace(`${selectedCode} `, "").replace(/\D/g, "")
+          : phoneValue.replace(/\D/g, "");
 
         return (
           <div className="w-full">
@@ -455,26 +507,26 @@ const TypeformQuiz: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowCountryDropdown(!showCountryDropdown)}
-                  className="flex items-center bg-purple-900/50 border border-purple-700/50 rounded px-2 py-1 text-white"
+                  className="flex items-center bg-purple-900/50 border border-purple-700/50 rounded px-2 py-1 text-white min-w-[80px]"
                 >
                   {selectedCode}
-                  <ChevronDown className="ml-1 w-4 h-4" />
+                  <ChevronRight className="ml-1 w-4 h-4 rotate-90" />
                 </button>
 
                 {showCountryDropdown && (
                   <div className="absolute top-full left-0 mt-1 max-h-60 overflow-y-auto bg-purple-900/90 border border-purple-700/50 rounded z-10 w-64">
-                    {countryCodes.map((country) => (
+                    {countryCodes.map((country, index) => (
                       <button
-                        key={`${country.code}-${country.country}`}
+                        key={`${country.code}-${country.country}-${index}`}
                         type="button"
                         className="block w-full text-left px-3 py-2 hover:bg-purple-800/80 text-white"
                         onClick={() => {
                           setSelectedCode(country.code);
                           setShowCountryDropdown(false);
+                          setPhoneValidationError(null);
                         }}
                       >
-                        <span className="font-medium">{country.code}</span>{" "}
-                        {country.country}
+                        <span className="font-medium">{country.code}</span> {country.country}
                       </button>
                     ))}
                   </div>
@@ -484,76 +536,157 @@ const TypeformQuiz: React.FC = () => {
               <input
                 ref={inputRef}
                 type="tel"
-                value={numbersOnly}
+                value={nationalNumber}
                 onChange={handlePhoneChange}
                 onKeyDown={handleKeyDown}
                 className="flex-1 bg-transparent border-b-2 border-white/30 focus:border-white py-2 px-1 text-lg outline-none text-white"
                 placeholder="1234567890"
-                maxLength={10}
               />
             </div>
-            <div className="text-xs text-white/60 mt-1">
-              {numbersOnly.length >= 8 && numbersOnly.length <= 10 ? (
-                <span className="text-green-500">✅</span>
-              ) : null}
-            </div>
+            {phoneValidationError && (
+              <div className="text-xs text-red-300 mt-2">{phoneValidationError}</div>
+            )}
           </div>
         );
 
       case "select":
-        return (
-          <div className="w-full space-y-2">
-            {question.options?.map((option) => (
-              <button
-                key={option.id}
-                onClick={() => handleOptionSelect(option.id, option.text)}
-                className={`w-full text-left p-3 rounded-md transition-colors duration-200 ${
-                  answers[question.id] === option.id
-                    ? "bg-[#222428]/50 text-white/70 cursor-not-allowed"
-                    : "bg-[#222428] text-white hover:bg-[#2a2d33]"
-                } text-white`}
-              >
-                <div className="flex items-center">
-                  <div
-                    className={`flex-shrink-0 w-6 h-6 rounded-full border flex items-center justify-center mr-3 ${
-                      answers[question.id] === option.id
-                        ? "border-white bg-white/20"
-                        : "border-white/50"
-                    }`}
+        if (question.id === "procedure") {
+          return (
+            <div className="w-full">
+              <div className="max-h-80 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+                {DENTAL_PROCEDURES.map((procedure) => (
+                  <button
+                    key={procedure.id}
+                    onClick={() => handleOptionSelect(procedure.id, procedure.name)}
+                    className={`w-full text-left p-4 rounded-md transition-colors duration-200 ${
+                      answers[question.id] === procedure.id
+                        ? "bg-blue-700/70 border border-blue-500"
+                        : "bg-purple-900/40 border border-purple-800/30 hover:bg-purple-800/50"
+                    } text-white`}
                   >
-                    {answers[question.id] === option.id && (
-                      <div className="w-3 h-3 rounded-full bg-white"></div>
-                    )}
-                  </div>
-                  {option.text}
+                    <div className="flex items-start">
+                      <Stethoscope className="h-5 w-5 mr-3 mt-1 text-blue-400 flex-shrink-0" />
+                      <div>
+                        <div className="font-medium">{procedure.name}</div>
+                        <div className="text-sm text-white/70">{procedure.description}</div>
+                        <div className="text-xs text-white/50 mt-1">
+                          Duración aproximada: {procedure.duration} min
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              
+              {/* Scroll indicator */}
+              <div className="text-center mt-3">
+                <div className="text-xs text-white/50 flex items-center justify-center gap-2">
+                  <div className="w-1 h-1 bg-white/30 rounded-full"></div>
+                  <span>Desliza para ver más opciones</span>
+                  <div className="w-1 h-1 bg-white/30 rounded-full"></div>
                 </div>
-              </button>
-            ))}
+              </div>
+            </div>
+          );
+        }
+
+        if (question.id === "doctor") {
+          return (
+            <div className="w-full">
+              <div className="max-h-80 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+                {doctors.map((doctor) => (
+                  <button
+                    key={doctor.uid}
+                    onClick={() => handleOptionSelect(doctor.uid, doctor.displayName || doctor.email)}
+                    className={`w-full text-left p-4 rounded-md transition-colors duration-200 ${
+                      answers[question.id] === doctor.uid
+                        ? "bg-blue-700/70 border border-blue-500"
+                        : "bg-purple-900/40 border border-purple-800/30 hover:bg-purple-800/50"
+                    } text-white`}
+                  >
+                    <div className="flex items-center">
+                      <User className="h-5 w-5 mr-3 text-blue-400 flex-shrink-0" />
+                      <div>
+                        <div className="font-medium">Dr. {doctor.displayName || doctor.email}</div>
+                        <div className="text-sm text-white/70">Odontólogo</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              
+              {/* Show scroll indicator only if there are many doctors */}
+              {doctors.length > 4 && (
+                <div className="text-center mt-3">
+                  <div className="text-xs text-white/50 flex items-center justify-center gap-2">
+                    <div className="w-1 h-1 bg-white/30 rounded-full"></div>
+                    <span>Desliza para ver más doctores</span>
+                    <div className="w-1 h-1 bg-white/30 rounded-full"></div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        }
+        break;
+
+      case "calendar":
+        return (
+          <div className="w-full">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {availableDates.map((date, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleOptionSelect(date.toISOString().split('T')[0], formatDate(date))}
+                  className={`p-4 rounded-md transition-colors duration-200 ${
+                    answers[question.id] === date.toISOString().split('T')[0]
+                      ? "bg-blue-700/70 border border-blue-500"
+                      : "bg-purple-900/40 border border-purple-800/30 hover:bg-purple-800/50"
+                  } text-white text-left`}
+                >
+                  <div className="flex items-center">
+                    <Calendar className="h-5 w-5 mr-3 text-blue-400" />
+                    <div>
+                      <div className="font-medium">{formatDate(date)}</div>
+                      <div className="text-sm text-white/70">
+                        {date.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         );
 
-      case "textarea":
+      case "time":
         return (
           <div className="w-full">
-            <textarea
-              ref={textareaRef}
-              value={answers[question.id] || ""}
-              onChange={handleInputChange}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && e.shiftKey) return;
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleNext();
-                }
-              }}
-              rows={5}
-              className="w-full bg-transparent border-2 border-white/30 focus:border-white rounded-md py-2 px-3 text-lg outline-none text-white resize-none"
-              placeholder="Escribe tu respuesta aquí..."
-              minLength={10}
-            />
-            <p className="text-white/60 text-xs mt-1">
-              Presiona Shift + Enter para hacer un salto de línea
-            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {availableTimes.map((time) => (
+                <button
+                  key={time}
+                  onClick={() => handleOptionSelect(time)}
+                  className={`p-3 rounded-md transition-colors duration-200 ${
+                    answers[question.id] === time
+                      ? "bg-blue-700/70 border border-blue-500"
+                      : "bg-purple-900/40 border border-purple-800/30 hover:bg-purple-800/50"
+                  } text-white text-center`}
+                >
+                  <div className="flex items-center justify-center">
+                    <Clock className="h-4 w-4 mr-2 text-blue-400" />
+                    <span className="font-medium">{time}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            {availableTimes.length === 0 && (
+              <div className="text-center text-white/70 py-8">
+                <Clock className="h-12 w-12 mx-auto mb-4 text-white/50" />
+                <p>No hay horarios disponibles para esta fecha.</p>
+                <p className="text-sm mt-2">Por favor selecciona otra fecha.</p>
+              </div>
+            )}
           </div>
         );
 
@@ -562,26 +695,55 @@ const TypeformQuiz: React.FC = () => {
     }
   };
 
-  // If the form is submitted, show success message
+  // Success screen
   if (isSubmitted) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-purple-900 to-purple-950 flex justify-center items-center p-6">
+      <div className="min-h-screen bg-gradient-to-b from-blue-900 to-blue-950 flex justify-center items-center p-6">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="bg-purple-900/40 backdrop-blur-md rounded-xl p-8 max-w-md w-full text-center border border-purple-700/30"
+          className="bg-blue-900/40 backdrop-blur-md rounded-xl p-8 max-w-md w-full text-center border border-blue-700/30"
         >
-          <div className="text-4xl mb-4">🎉</div>
+          <div className="text-4xl mb-4">🦷</div>
           <h2 className="text-2xl font-bold text-white mb-3">
-            ¡Gracias por aplicar!
+            ¡Solicitud Enviada!
           </h2>
           <p className="text-white/80 mb-6">
-            Hemos recibido tu solicitud. Nos pondremos en contacto contigo
-            pronto.
+            Hemos recibido tu solicitud de cita. Nos pondremos en contacto contigo pronto para confirmar tu cita.
           </p>
+
+          <div className="bg-blue-800/50 rounded-lg p-4 mb-6 text-left">
+            <h3 className="font-medium text-white mb-2">Resumen de tu solicitud:</h3>
+            <div className="space-y-1 text-sm text-white/80">
+              <p><strong>Procedimiento:</strong> {answers.procedure_text}</p>
+              <p><strong>Doctor:</strong> Dr. {answers.doctor_text}</p>
+              <p><strong>Fecha:</strong> {answers.date_text}</p>
+              <p><strong>Hora:</strong> {answers.time}</p>
+            </div>
+          </div>
+
+          {answers.phone && (
+            <div className="mb-4">
+              <a
+                href={generateWhatsAppLink(
+                  `Hola! Soy ${answers.name}. Acabo de solicitar una cita dental para ${answers.procedure_text} el ${answers.date_text} a las ${answers.time}. ¿Pueden confirmar mi cita?`
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-6 rounded-md transition-colors mb-3 w-full justify-center"
+              >
+                <Phone className="w-5 h-5" />
+                Confirmar por WhatsApp
+              </a>
+              <p className="text-white/60 text-xs">
+                Para confirmación más rápida
+              </p>
+            </div>
+          )}
+
           <button
-            onClick={() => (window.location.href = "/")}
-            className="bg-white text-purple-900 font-medium py-2 px-6 rounded-md hover:bg-white/90 transition-colors"
+            onClick={() => window.location.href = "/"}
+            className="bg-white text-blue-900 font-medium py-2 px-6 rounded-md hover:bg-white/90 transition-colors w-full"
           >
             Volver al inicio
           </button>
@@ -591,22 +753,25 @@ const TypeformQuiz: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#2a2d33] to-[#222428]  flex justify-center items-center relative overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-b from-blue-900 to-blue-950 flex justify-center items-center relative overflow-hidden">
       {/* Background elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {/* Background gradient shapes */}
-        <div className="absolute top-1/4 -left-20 w-64 h-64 rounded-full bg-purple-700/20 blur-3xl"></div>
-        <div className="absolute bottom-1/3 -right-20 w-80 h-80 rounded-full bg-purple-600/10 blur-3xl"></div>
-
-        {/* Subtle animated particles */}
+        <div className="absolute top-1/4 -left-20 w-64 h-64 rounded-full bg-blue-700/20 blur-3xl"></div>
+        <div className="absolute bottom-1/3 -right-20 w-80 h-80 rounded-full bg-blue-600/10 blur-3xl"></div>
       </div>
 
       {/* Main container */}
-      <div className="w-full max-w-2xl mx-auto px-6 py-8 relative z-10">
+      <div className="w-full max-w-3xl mx-auto px-6 py-8 relative z-10">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-white mb-2">🦷 Agenda tu Cita Dental</h1>
+          <p className="text-white/70">Reserva tu cita con nuestros especialistas</p>
+        </div>
+
         {/* Progress bar */}
-        <div className="w-full bg-white/10 rounded-full h-1 mb-8">
+        <div className="w-full bg-white/10 rounded-full h-2 mb-8">
           <motion.div
-            className="h-1 rounded-full bg-white"
+            className="h-2 rounded-full bg-white"
             initial={{ width: 0 }}
             animate={{
               width: `${((currentQuestion + 1) / questions.length) * 100}%`,
@@ -616,7 +781,7 @@ const TypeformQuiz: React.FC = () => {
         </div>
 
         {/* Question container */}
-        <div className="relative h-[500px] sm:h-[400px]">
+        <div className="relative min-h-[500px]">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentQuestion}
@@ -624,18 +789,18 @@ const TypeformQuiz: React.FC = () => {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -50 }}
               transition={{ duration: 0.3 }}
-              className="absolute inset-0 flex flex-col items-start"
+              className="absolute inset-0 flex flex-col"
             >
               {/* Question counter */}
               <div className="text-white/60 text-sm mb-2">
-                {currentQuestion + 1} → {questions.length}
+                {currentQuestion + 1} de {questions.length}
               </div>
 
               {/* Question text */}
               <h2 className="text-xl sm:text-2xl md:text-3xl font-medium text-white mb-2">
                 {questions[currentQuestion].text}
                 {questions[currentQuestion].required && (
-                  <span className="text-purple-300">*</span>
+                  <span className="text-blue-300">*</span>
                 )}
               </h2>
 
@@ -647,17 +812,17 @@ const TypeformQuiz: React.FC = () => {
               )}
 
               {/* Question input */}
-              <div className="mt-6 w-full">{renderQuestion()}</div>
+              <div className="flex-1 w-full">{renderQuestion()}</div>
 
               {/* Error message */}
               {error && (
-                <div className="mt-3 text-red-300 text-sm bg-red-900/20 border border-red-500/30 rounded-md px-3 py-2">
+                <div className="mt-4 text-red-300 text-sm bg-red-900/20 border border-red-500/30 rounded-md px-3 py-2">
                   {error}
                 </div>
               )}
 
               {/* Navigation buttons */}
-              <div className="mt-auto pt-8 flex justify-between w-full">
+              <div className="mt-8 flex justify-between w-full">
                 <button
                   onClick={handlePrev}
                   disabled={currentQuestion === 0}
@@ -676,20 +841,20 @@ const TypeformQuiz: React.FC = () => {
                   disabled={isSubmitting}
                   className={`flex items-center gap-1 py-2 px-4 rounded-md ${
                     isSubmitting
-                      ? "bg-[#222428]/50 text-white/70 cursor-not-allowed"
-                      : "bg-[#222428] text-white hover:bg-[#2a2d33]"
+                      ? "bg-blue-700/50 text-white/70 cursor-not-allowed"
+                      : "bg-blue-700 text-white hover:bg-blue-600"
                   } transition-colors`}
                 >
                   {isSubmitting ? (
                     <>
-                      <Spinner className="w-4 h-4 animate-spin" />
+                      <div className="w-4 h-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                       <span>Enviando...</span>
                     </>
                   ) : (
                     <>
                       <span>
                         {currentQuestion === questions.length - 1
-                          ? "Enviar"
+                          ? "Solicitar Cita"
                           : "Siguiente"}
                       </span>
                       <ChevronRight className="w-4 h-4" />
@@ -701,54 +866,13 @@ const TypeformQuiz: React.FC = () => {
           </AnimatePresence>
         </div>
 
-        {/* Powered by (like Typeform) */}
-        <div className="absolute bottom-2 right-2 text-white/40 text-xs">
-          Powered by Decode Next
+        {/* Footer */}
+        <div className="text-center mt-8 text-white/40 text-xs">
+          <p>🦷 Sistema de Citas Dentales</p>
         </div>
       </div>
     </div>
   );
 };
 
-// Helper components
-const ChevronDown = ({ className = "w-6 h-6" }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    className={className}
-    fill="none"
-    viewBox="0 0 24 24"
-    stroke="currentColor"
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M19 9l-7 7-7-7"
-    />
-  </svg>
-);
-
-const Spinner = ({ className = "w-6 h-6" }: { className?: string }) => (
-  <svg
-    className={className}
-    xmlns="http://www.w3.org/2000/svg"
-    fill="none"
-    viewBox="0 0 24 24"
-  >
-    <circle
-      className="opacity-25"
-      cx="12"
-      cy="12"
-      r="10"
-      stroke="currentColor"
-      strokeWidth="4"
-    />
-    <path
-      className="opacity-75"
-      fill="currentColor"
-      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-    />
-  </svg>
-);
-
-export default TypeformQuiz;
+export default DentalAppointmentForm;
