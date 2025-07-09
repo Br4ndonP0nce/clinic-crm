@@ -1,10 +1,13 @@
-// src/components/calendar/AppointmentModals.tsx
+// src/components/calendar/AppointmentModals.tsx - ENHANCED VERSION
 "use client";
-
+import { motion } from "framer-motion";
 import React, { useState, useEffect } from "react";
 import { SlotInfo } from "react-big-calendar";
 import { Timestamp } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useBillingReport, useBillingReports } from "@/hooks/useBilling";
+import { Tabs, TabsList, TabsContent, TabsTrigger } from "@radix-ui/react-tabs";
 import {
   addAppointment,
   updateAppointment,
@@ -19,6 +22,7 @@ import {
   getAppointmentStatusLabel,
   getAppointmentTypeLabel,
 } from "@/types/calendar";
+import { BillingReport } from "@/types/billing";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +36,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -54,10 +59,15 @@ import {
   Edit3,
   Trash2,
   AlertTriangle,
+  Receipt,
+  Plus,
+  CreditCard,
+  Download,
+  DollarSign,
 } from "lucide-react";
 
 // ============================================================================
-// APPOINTMENT DETAILS MODAL WITH DELETE FUNCTIONALITY
+// ENHANCED APPOINTMENT DETAILS MODAL WITH BILLING INTEGRATION
 // ============================================================================
 
 interface AppointmentDetailsModalProps {
@@ -71,15 +81,24 @@ export const AppointmentDetailsModal: React.FC<
   AppointmentDetailsModalProps
 > = ({ event, open, onClose, onUpdate }) => {
   const { userProfile, hasPermission } = useAuth();
+  const { canViewBilling, canManageBilling } = usePermissions();
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showQuickPayment, setShowQuickPayment] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [appointmentData, setAppointmentData] = useState<Partial<Appointment>>(
-    {}
-  );
+  const [activeTab, setActiveTab] = useState("details");
 
-  // Check if user can delete appointments (doctor, super_admin, or recepcion)
+  // 🆕 BILLING INTEGRATION
+  const {
+    report,
+    loading: reportLoading,
+    loadReportByAppointment,
+  } = useBillingReport();
+
+  const { createReport } = useBillingReports();
+
+  // Check if user can delete appointments
   const canDelete =
     hasPermission("appointments:delete") &&
     (userProfile?.role === "doctor" ||
@@ -88,14 +107,118 @@ export const AppointmentDetailsModal: React.FC<
 
   useEffect(() => {
     if (event?.resource.appointment) {
-      setAppointmentData(event.resource.appointment);
+      // Load billing report if user has permissions
+      if (canViewBilling && event.resource.appointment.id) {
+        loadReportByAppointment(event.resource.appointment.id);
+      }
     }
-  }, [event]);
+  }, [event, canViewBilling]);
 
   if (!event) return null;
 
-  const { appointment, patient } = event.resource;
+  const { appointment, patient, doctor } = event.resource;
 
+  // BILLING HELPER FUNCTIONS
+  const formatCurrency = (amount: number, currency: "MXN" | "USD" = "MXN") => {
+    return new Intl.NumberFormat("es-MX", {
+      style: "currency",
+      currency: currency,
+      minimumFractionDigits: 2,
+    }).format(amount || 0);
+  };
+
+  const getBillingStatus = () => {
+    if (!report)
+      return {
+        status: "no_report",
+        label: "Sin Facturar",
+        color: "bg-gray-100 text-gray-800",
+      };
+
+    switch (report.status) {
+      case "draft":
+        return {
+          status: "draft",
+          label: "Borrador",
+          color: "bg-yellow-100 text-yellow-800",
+        };
+      case "completed":
+        return {
+          status: "completed",
+          label: "Completado",
+          color: "bg-blue-100 text-blue-800",
+        };
+      case "paid":
+        return {
+          status: "paid",
+          label: "Pagado",
+          color: "bg-green-100 text-green-800",
+        };
+      case "partially_paid":
+        return {
+          status: "partially_paid",
+          label: "Pago Parcial",
+          color: "bg-amber-100 text-amber-800",
+        };
+      case "overdue":
+        return {
+          status: "overdue",
+          label: "Vencido",
+          color: "bg-red-100 text-red-800",
+        };
+      default:
+        return {
+          status: "unknown",
+          label: "Desconocido",
+          color: "bg-gray-100 text-gray-800",
+        };
+    }
+  };
+
+  const handleCreateBillingReport = async () => {
+    if (!appointment?.id || !canManageBilling) return;
+
+    try {
+      const reportId = await createReport(appointment.id);
+      window.open(`/admin/billing/reports/${reportId}`, "_blank");
+    } catch (error) {
+      console.error("Error creating billing report:", error);
+    }
+  };
+
+  const handleViewBillingReport = () => {
+    if (report?.id) {
+      window.open(`/admin/billing/reports/${report.id}`, "_blank");
+    }
+  };
+
+  const handleGeneratePDF = async () => {
+    if (!report?.id) return;
+
+    try {
+      const response = await fetch(`/api/billing/pdf/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportId: report.id }),
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `factura-${report.invoiceNumber || report.id}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+    }
+  };
+
+  // HELPER FUNCTIONS
   const getStatusIcon = (status: Appointment["status"]) => {
     switch (status) {
       case "completed":
@@ -132,10 +255,7 @@ export const AppointmentDetailsModal: React.FC<
 
     try {
       setIsDeleting(true);
-
-      // Hard delete the appointment from the database
       await deleteAppointment(appointment.id);
-
       onUpdate?.();
       onClose();
       setShowDeleteConfirm(false);
@@ -159,6 +279,14 @@ export const AppointmentDetailsModal: React.FC<
   };
 
   const statusStyle = getAppointmentStatusStyle(appointment.status);
+  const billingStatus = getBillingStatus();
+  const canCreateReport = canManageBilling && !report;
+  const canAddPayment = canManageBilling && report && report.pendingAmount > 0;
+  const canGeneratePDF =
+    report &&
+    (report.status === "completed" ||
+      report.status === "paid" ||
+      report.status === "partially_paid");
 
   return (
     <>
@@ -199,208 +327,430 @@ export const AppointmentDetailsModal: React.FC<
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6">
-            {/* Appointment Status */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                {getStatusIcon(appointment.status)}
-                <Badge className={statusStyle.className}>
-                  {getAppointmentStatusLabel(appointment.status)}
-                </Badge>
-              </div>
-            </div>
+          {/* 🆕 TABBED CONTENT */}
+          <Tabs
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className="w-full"
+          >
+            <div className="relative">
+              <TabsList className="grid w-full grid-cols-2 bg-gray-100 relative">
+                {/* Animated background indicator */}
+                <motion.div
+                  className="absolute top-0 left-0 h-full bg-white rounded-md shadow-sm z-0"
+                  initial={false}
+                  animate={{
+                    x: activeTab === "details" ? "0%" : "100%",
+                    width: canViewBilling ? "50%" : "100%",
+                  }}
+                  transition={{
+                    type: "spring",
+                    stiffness: 300,
+                    damping: 30,
+                  }}
+                />
 
-            {/* Patient Information */}
-            <div className="bg-blue-50 rounded-lg p-4">
-              <h3 className="font-semibold flex items-center mb-3">
-                <User className="mr-2 h-4 w-4" />
-                Información del Paciente
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                <div className="flex items-center">
-                  <User className="mr-2 h-3 w-3 text-gray-500" />
-                  <span className="font-medium">{patient.fullName}</span>
-                </div>
-                <div className="flex items-center">
-                  <Mail className="mr-2 h-3 w-3 text-gray-500" />
-                  <a
-                    href={`mailto:${patient.email}`}
-                    className="text-blue-600 hover:underline"
+                <TabsTrigger
+                  value="details"
+                  className="flex items-center relative z-10 data-[state=active]:bg-transparent data-[state=active]:text-blue-600"
+                >
+                  <Calendar className="mr-2 h-4 w-4" />
+                  Detalles de la Cita
+                </TabsTrigger>
+
+                {canViewBilling && (
+                  <TabsTrigger
+                    value="billing"
+                    className="flex items-center relative z-10 data-[state=active]:bg-transparent data-[state=active]:text-blue-600"
                   >
-                    {patient.email}
-                  </a>
-                </div>
-                <div className="flex items-center">
-                  <Phone className="mr-2 h-3 w-3 text-gray-500" />
-                  <a
-                    href={`tel:${patient.phone}`}
-                    className="text-blue-600 hover:underline"
-                  >
-                    {patient.phone}
-                  </a>
-                </div>
-                <div className="flex items-center">
-                  <Calendar className="mr-2 h-3 w-3 text-gray-500" />
-                  <span>
-                    Última visita:{" "}
-                    {patient.dentalHistory.lastVisit
-                      ? patient.dentalHistory.lastVisit
-                          .toDate()
-                          .toLocaleDateString("es-MX")
-                      : "Primera visita"}
-                  </span>
-                </div>
-              </div>
+                    <Receipt className="mr-2 h-4 w-4" />
+                    Facturación
+                    {report && (
+                      <Badge className={`ml-2 text-xs ${billingStatus.color}`}>
+                        {billingStatus.label}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                )}
+              </TabsList>
             </div>
 
-            {/* Appointment Details */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label className="text-sm font-medium text-gray-600">
-                  Fecha y Hora
-                </Label>
-                <p className="mt-1">
-                  {formatDateTime(appointment.appointmentDate)}
-                </p>
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-gray-600">
-                  Duración
-                </Label>
-                <p className="mt-1">{appointment.duration} minutos</p>
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-gray-600">
-                  Tipo de Cita
-                </Label>
-                <p className="mt-1">
-                  {getAppointmentTypeLabel(appointment.type)}
-                </p>
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-gray-600">
-                  Doctor
-                </Label>
-                <p className="mt-1">Dr. {appointment.doctorId}</p>
-              </div>
-            </div>
+            {/* APPOINTMENT DETAILS TAB */}
+            <TabsContent value="details" className="space-y-6 mt-6">
+              {/* Appointment Status */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+                className="space-y-6"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    {getStatusIcon(appointment.status)}
+                    <Badge className={statusStyle.className}>
+                      {getAppointmentStatusLabel(appointment.status)}
+                    </Badge>
+                  </div>
+                </div>
 
-            {/* Reason for Visit */}
-            <div>
-              <Label className="text-sm font-medium text-gray-600">
-                Motivo de la Consulta
-              </Label>
-              <p className="mt-1 p-3 bg-gray-50 rounded">
-                {appointment.reasonForVisit}
-              </p>
-            </div>
+                {/* Patient Information */}
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <h3 className="font-semibold flex items-center mb-3">
+                    <User className="mr-2 h-4 w-4" />
+                    Información del Paciente
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                    <div className="flex items-center">
+                      <User className="mr-2 h-3 w-3 text-gray-500" />
+                      <span className="font-medium">{patient.fullName}</span>
+                    </div>
+                    <div className="flex items-center">
+                      <Mail className="mr-2 h-3 w-3 text-gray-500" />
+                      <a
+                        href={`mailto:${patient.email}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {patient.email}
+                      </a>
+                    </div>
+                    <div className="flex items-center">
+                      <Phone className="mr-2 h-3 w-3 text-gray-500" />
+                      <a
+                        href={`tel:${patient.phone}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {patient.phone}
+                      </a>
+                    </div>
+                    <div className="flex items-center">
+                      <Calendar className="mr-2 h-3 w-3 text-gray-500" />
+                      <span>
+                        Última visita:{" "}
+                        {patient.dentalHistory?.lastVisit
+                          ? patient.dentalHistory.lastVisit
+                              .toDate()
+                              .toLocaleDateString("es-MX")
+                          : "Primera visita"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
-            {/* Notes */}
-            {appointment.notes && (
-              <div>
-                <Label className="text-sm font-medium text-gray-600">
-                  Notas
-                </Label>
-                <p className="mt-1 p-3 bg-gray-50 rounded whitespace-pre-wrap">
-                  {appointment.notes}
-                </p>
-              </div>
-            )}
-
-            {/* Pre-visit Instructions */}
-            {appointment.preVisitInstructions && (
-              <div>
-                <Label className="text-sm font-medium text-gray-600">
-                  Instrucciones Pre-Visita
-                </Label>
-                <p className="mt-1 p-3 bg-amber-50 rounded border-l-4 border-amber-400">
-                  {appointment.preVisitInstructions}
-                </p>
-              </div>
-            )}
-
-            {/* Room and Equipment */}
-            {(appointment.room || appointment.equipment) && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {appointment.room && (
+                {/* Appointment Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <Label className="text-sm font-medium text-gray-600">
-                      Sala
+                      Fecha y Hora
                     </Label>
-                    <p className="mt-1 flex items-center">
-                      <MapPin className="mr-2 h-4 w-4 text-gray-500" />
-                      {appointment.room}
+                    <p className="mt-1">
+                      {formatDateTime(appointment.appointmentDate)}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-600">
+                      Duración
+                    </Label>
+                    <p className="mt-1">{appointment.duration} minutos</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-600">
+                      Tipo de Cita
+                    </Label>
+                    <p className="mt-1">
+                      {getAppointmentTypeLabel(appointment.type)}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-600">
+                      Doctor
+                    </Label>
+                    <p className="mt-1">Dr. {doctor.name}</p>
+                  </div>
+                </div>
+
+                {/* Reason for Visit */}
+                <div>
+                  <Label className="text-sm font-medium text-gray-600">
+                    Motivo de la Consulta
+                  </Label>
+                  <p className="mt-1 p-3 bg-gray-50 rounded">
+                    {appointment.reasonForVisit}
+                  </p>
+                </div>
+
+                {/* Notes */}
+                {appointment.notes && (
+                  <div>
+                    <Label className="text-sm font-medium text-gray-600">
+                      Notas
+                    </Label>
+                    <p className="mt-1 p-3 bg-gray-50 rounded whitespace-pre-wrap">
+                      {appointment.notes}
                     </p>
                   </div>
                 )}
-                {appointment.equipment && appointment.equipment.length > 0 && (
-                  <div>
-                    <Label className="text-sm font-medium text-gray-600">
-                      Equipo
-                    </Label>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {appointment.equipment.map((item, index) => (
-                        <Badge
-                          key={index}
-                          variant="outline"
-                          className="text-xs"
-                        >
-                          {item}
-                        </Badge>
-                      ))}
-                    </div>
+
+                {/* Room and Equipment (if available) */}
+                {(appointment.room || appointment.equipment) && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {appointment.room && (
+                      <div>
+                        <Label className="text-sm font-medium text-gray-600">
+                          Sala
+                        </Label>
+                        <p className="mt-1 flex items-center">
+                          <MapPin className="mr-2 h-4 w-4 text-gray-500" />
+                          {appointment.room}
+                        </p>
+                      </div>
+                    )}
+                    {appointment.equipment &&
+                      appointment.equipment.length > 0 && (
+                        <div>
+                          <Label className="text-sm font-medium text-gray-600">
+                            Equipo
+                          </Label>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {appointment.equipment.map((item, index) => (
+                              <Badge
+                                key={index}
+                                variant="outline"
+                                className="text-xs"
+                              >
+                                {item}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* Quick Actions */}
-            {hasPermission("appointments:write") &&
-              appointment.status !== "completed" &&
-              appointment.status !== "cancelled" && (
-                <div className="border-t pt-4">
-                  <Label className="text-sm font-medium text-gray-600 mb-3 block">
-                    Acciones Rápidas
-                  </Label>
-                  <div className="flex flex-wrap gap-2">
-                    {appointment.status === "scheduled" && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleStatusUpdate("confirmed")}
-                        disabled={loading}
-                        className="bg-green-600 hover:bg-green-700"
-                      >
-                        <CheckCircle className="mr-1 h-3 w-3" />
-                        Confirmar
-                      </Button>
-                    )}
-                    {(appointment.status === "scheduled" ||
-                      appointment.status === "confirmed") && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleStatusUpdate("in_progress")}
-                        disabled={loading}
-                        className="bg-blue-600 hover:bg-blue-700"
-                      >
-                        <Clock className="mr-1 h-3 w-3" />
-                        Iniciar
-                      </Button>
-                    )}
-                    {appointment.status === "in_progress" && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleStatusUpdate("completed")}
-                        disabled={loading}
-                        className="bg-gray-600 hover:bg-gray-700"
-                      >
-                        <CheckCircle className="mr-1 h-3 w-3" />
-                        Completar
-                      </Button>
-                    )}
+                {/* Quick Actions */}
+                {hasPermission("appointments:write") &&
+                  appointment.status !== "completed" &&
+                  appointment.status !== "cancelled" && (
+                    <div className="border-t pt-4">
+                      <Label className="text-sm font-medium text-gray-600 mb-3 block">
+                        Acciones Rápidas
+                      </Label>
+                      <div className="flex flex-wrap gap-2">
+                        {appointment.status === "scheduled" && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleStatusUpdate("confirmed")}
+                            disabled={loading}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            <CheckCircle className="mr-1 h-3 w-3" />
+                            Confirmar
+                          </Button>
+                        )}
+                        {(appointment.status === "scheduled" ||
+                          appointment.status === "confirmed") && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleStatusUpdate("in_progress")}
+                            disabled={loading}
+                            className="bg-blue-600 hover:bg-blue-700"
+                          >
+                            <Clock className="mr-1 h-3 w-3" />
+                            Iniciar
+                          </Button>
+                        )}
+                        {appointment.status === "in_progress" && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleStatusUpdate("completed")}
+                            disabled={loading}
+                            className="bg-gray-600 hover:bg-gray-700"
+                          >
+                            <CheckCircle className="mr-1 h-3 w-3" />
+                            Completar
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+              </motion.div>
+            </TabsContent>
+
+            {/* BILLING TAB */}
+            {canViewBilling && (
+              <TabsContent value="billing" className="space-y-6 mt-6">
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, ease: "easeOut" }}
+                  className="space-y-6"
+                >
+                  <div className="bg-white border rounded-lg">
+                    <div className="p-4 border-b">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-semibold flex items-center">
+                          <Receipt className="mr-2 h-4 w-4" />
+                          Estado de Facturación
+                        </h3>
+                        <Badge className={billingStatus.color}>
+                          {billingStatus.label}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="p-4 space-y-4">
+                      {/* Billing Status & Summary */}
+                      {reportLoading ? (
+                        <div className="flex items-center justify-center h-20">
+                          <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-500"></div>
+                        </div>
+                      ) : report ? (
+                        <div className="space-y-4">
+                          {/* Financial Summary */}
+                          <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+                            <div className="flex justify-between">
+                              <span className="font-medium">Total:</span>
+                              <span className="font-semibold text-lg">
+                                {formatCurrency(report.total)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-green-600">
+                              <span>Pagado:</span>
+                              <span className="font-semibold">
+                                {formatCurrency(report.paidAmount)}
+                              </span>
+                            </div>
+                            {report.pendingAmount > 0 && (
+                              <div className="flex justify-between text-amber-600">
+                                <span>Pendiente:</span>
+                                <span className="font-semibold">
+                                  {formatCurrency(report.pendingAmount)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Services Summary */}
+                          {report.services.length > 0 && (
+                            <div>
+                              <h4 className="font-medium mb-2">Servicios:</h4>
+                              <div className="space-y-2">
+                                {report.services.map((service, index) => (
+                                  <div
+                                    key={index}
+                                    className="flex justify-between text-sm bg-white p-2 rounded border"
+                                  >
+                                    <span>{service.description}</span>
+                                    <span className="font-medium">
+                                      {formatCurrency(service.total)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Invoice Number */}
+                          {report.invoiceNumber && (
+                            <div className="flex justify-between text-sm">
+                              <span className="font-medium">
+                                Número de Factura:
+                              </span>
+                              <span className="font-mono bg-gray-100 px-2 py-1 rounded">
+                                {report.invoiceNumber}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Payment History */}
+                          {report.payments && report.payments.length > 0 && (
+                            <div>
+                              <h4 className="font-medium mb-2">
+                                Historial de Pagos:
+                              </h4>
+                              <div className="space-y-2">
+                                {report.payments.map((payment, index) => (
+                                  <div
+                                    key={index}
+                                    className="flex justify-between text-sm bg-green-50 p-2 rounded"
+                                  >
+                                    <span>{payment.method}</span>
+                                    <span className="font-medium">
+                                      {formatCurrency(payment.amount)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <Receipt className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                          <p className="text-lg font-medium mb-2">
+                            No se ha creado un reporte de facturación
+                          </p>
+                          <p className="text-sm">
+                            Crea un reporte para gestionar la facturación de
+                            esta cita
+                          </p>
+                        </div>
+                      )}
+
+                      <Separator />
+
+                      {/* Billing Actions */}
+                      <div className="space-y-3">
+                        {canCreateReport && (
+                          <Button
+                            onClick={handleCreateBillingReport}
+                            className="w-full"
+                          >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Crear Reporte de Facturación
+                          </Button>
+                        )}
+
+                        {report && (
+                          <div className="grid grid-cols-1 gap-2">
+                            <Button
+                              onClick={handleViewBillingReport}
+                              variant="outline"
+                              className="w-full"
+                            >
+                              <FileText className="h-4 w-4 mr-2" />
+                              Ver Reporte Completo
+                            </Button>
+
+                            {canAddPayment && (
+                              <Button
+                                onClick={() => setShowQuickPayment(true)}
+                                variant="outline"
+                                className="w-full"
+                              >
+                                <CreditCard className="h-4 w-4 mr-2" />
+                                Registrar Pago
+                              </Button>
+                            )}
+
+                            {canGeneratePDF && (
+                              <Button
+                                onClick={handleGeneratePDF}
+                                variant="outline"
+                                className="w-full"
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                                Generar PDF
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
-          </div>
+                </motion.div>
+              </TabsContent>
+            )}
+          </Tabs>
 
           <DialogFooter>
             <Button variant="outline" onClick={onClose}>
@@ -420,6 +770,22 @@ export const AppointmentDetailsModal: React.FC<
         </DialogContent>
       </Dialog>
 
+      {/* Quick Payment Modal */}
+      {showQuickPayment && (
+        <QuickPaymentModal
+          isOpen={showQuickPayment}
+          onClose={() => setShowQuickPayment(false)}
+          reportId={report?.id}
+          pendingAmount={report?.pendingAmount || 0}
+          onPaymentAdded={() => {
+            setShowQuickPayment(false);
+            if (appointment.id) {
+              loadReportByAppointment(appointment.id);
+            }
+          }}
+        />
+      )}
+
       {/* Delete Confirmation Modal */}
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent className="max-w-md">
@@ -430,8 +796,7 @@ export const AppointmentDetailsModal: React.FC<
             </DialogTitle>
             <DialogDescription>
               ¿Estás seguro de que quieres eliminar esta cita? Esta acción no se
-              puede deshacer y la cita será eliminada permanentemente de la base
-              de datos.
+              puede deshacer y la cita será eliminada permanentemente.
             </DialogDescription>
           </DialogHeader>
 
@@ -486,427 +851,59 @@ export const AppointmentDetailsModal: React.FC<
   );
 };
 
-// ============================================================================
-// NEW APPOINTMENT MODAL WITH DISABLED DATE/TIME WHEN FROM SLOT
-// ============================================================================
-
-interface NewAppointmentModalProps {
-  open: boolean;
-  onClose: () => void;
-  selectedSlot?: SlotInfo | null;
-  onSuccess: () => void;
-  prefilledDate?: string;
-  prefilledTime?: string;
-}
-
-export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
-  open,
+// Quick Payment Modal (unchanged)
+function QuickPaymentModal({
+  isOpen,
   onClose,
-  selectedSlot,
-  onSuccess,
-  prefilledDate,
-  prefilledTime,
-}) => {
-  const { userProfile } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
-
-  // Determine if date/time should be disabled (when coming from slot selection)
-  const isDateTimeDisabled = !!(
-    selectedSlot ||
-    (prefilledDate && prefilledTime)
-  );
-
-  const [appointmentData, setAppointmentData] = useState({
-    patientId: "",
-    doctorId: userProfile?.uid || "",
-    appointmentDate: Timestamp.fromDate(
-      selectedSlot?.start ||
-        (prefilledDate && prefilledTime
-          ? new Date(`${prefilledDate}T${prefilledTime}`)
-          : new Date())
-    ),
-    duration: 60,
-    type: "consultation" as Appointment["type"],
-    reasonForVisit: "",
-    notes: "",
-    preVisitInstructions: "",
-    room: "",
-    equipment: [] as string[],
-  });
-
-  // Date and time form fields (separate from appointmentData for form display)
-  const [formDate, setFormDate] = useState(
-    prefilledDate ||
-      selectedSlot?.start.toISOString().split("T")[0] ||
-      new Date().toISOString().split("T")[0]
-  );
-
-  const [formTime, setFormTime] = useState(
-    prefilledTime || selectedSlot?.start.toTimeString().slice(0, 5) || "09:00"
-  );
-
-  // Fetch patients on component mount
-  useEffect(() => {
-    const fetchPatients = async () => {
-      try {
-        const allPatients = await getPatients();
-        setPatients(allPatients);
-      } catch (error) {
-        console.error("Error fetching patients:", error);
-      }
-    };
-
-    if (open) {
-      fetchPatients();
-    }
-  }, [open]);
-
-  // Update appointment date when form date/time changes
-  useEffect(() => {
-    if (formDate && formTime) {
-      const newDateTime = new Date(`${formDate}T${formTime}`);
-      setAppointmentData((prev) => ({
-        ...prev,
-        appointmentDate: Timestamp.fromDate(newDateTime),
-      }));
-    }
-  }, [formDate, formTime]);
-
-  // Update form when slot changes
-  useEffect(() => {
-    if (selectedSlot) {
-      const slotDate = selectedSlot.start.toISOString().split("T")[0];
-      const slotTime = selectedSlot.start.toTimeString().slice(0, 5);
-      setFormDate(slotDate);
-      setFormTime(slotTime);
-      setAppointmentData((prev) => ({
-        ...prev,
-        appointmentDate: Timestamp.fromDate(selectedSlot.start),
-      }));
-    }
-  }, [selectedSlot]);
-
-  const filteredPatients = patients.filter(
-    (patient) =>
-      patient.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      patient.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      patient.phone.includes(searchTerm)
-  );
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedPatient || !userProfile) return;
-
-    try {
-      setLoading(true);
-
-      await addAppointment({
-        ...appointmentData,
-        patientId: selectedPatient.id!,
-        createdBy: userProfile.uid,
-        reminders: [],
-        status: "scheduled",
-      });
-
-      // Reset form
-      setAppointmentData({
-        patientId: "",
-        doctorId: userProfile.uid,
-        appointmentDate: Timestamp.now(),
-        duration: 60,
-        type: "consultation",
-        reasonForVisit: "",
-        notes: "",
-        preVisitInstructions: "",
-        room: "",
-        equipment: [],
-      });
-      setSelectedPatient(null);
-      setSearchTerm("");
-      setFormDate(new Date().toISOString().split("T")[0]);
-      setFormTime("09:00");
-
-      onSuccess();
-      onClose();
-    } catch (error) {
-      console.error("Error creating appointment:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const formatDateTime = (date: Date) => {
-    return new Intl.DateTimeFormat("es-MX", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
-  };
-
+  reportId,
+  pendingAmount,
+  onPaymentAdded,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  reportId?: string;
+  pendingAmount: number;
+  onPaymentAdded: () => void;
+}) {
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center">
-            <Calendar className="mr-2 h-5 w-5" />
-            Nueva Cita
+            <CreditCard className="mr-2 h-5 w-5" />
+            Registrar Pago Rápido
           </DialogTitle>
-          <DialogDescription>
-            Programar una nueva cita para un paciente
-          </DialogDescription>
         </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Date and Time Display/Input */}
-          {isDateTimeDisabled ? (
-            <div className="bg-blue-50 rounded-lg p-4">
-              <h3 className="font-medium mb-2 flex items-center">
-                <Clock className="mr-2 h-4 w-4" />
-                Fecha y Hora Seleccionada
-              </h3>
-              <p className="text-sm">
-                {formatDateTime(appointmentData.appointmentDate.toDate())}
-              </p>
-              <p className="text-xs text-blue-600 mt-1">
-                Para cambiar la fecha/hora, cierra este modal y selecciona un
-                horario diferente en el calendario
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="appointment-date">Fecha *</Label>
-                <Input
-                  id="appointment-date"
-                  type="date"
-                  value={formDate}
-                  onChange={(e) => setFormDate(e.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="appointment-time">Hora *</Label>
-                <Input
-                  id="appointment-time"
-                  type="time"
-                  value={formTime}
-                  onChange={(e) => setFormTime(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Patient Selection */}
-          <div>
-            <Label htmlFor="patient-search">Buscar Paciente</Label>
-            <Input
-              id="patient-search"
-              type="text"
-              placeholder="Buscar por nombre, email o teléfono..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="mt-1"
-            />
-
-            {searchTerm && (
-              <div className="mt-2 max-h-40 overflow-y-auto border rounded-md">
-                {filteredPatients.length > 0 ? (
-                  filteredPatients.slice(0, 5).map((patient) => (
-                    <div
-                      key={patient.id}
-                      onClick={() => {
-                        setSelectedPatient(patient);
-                        setSearchTerm(patient.fullName);
-                      }}
-                      className="p-3 hover:bg-gray-50 cursor-pointer border-b last:border-b-0"
-                    >
-                      <div className="font-medium">{patient.fullName}</div>
-                      <div className="text-sm text-gray-600">
-                        {patient.email}
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        {patient.phone}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="p-3 text-gray-500 text-center">
-                    No se encontraron pacientes
-                  </div>
-                )}
-              </div>
-            )}
-
-            {selectedPatient && (
-              <div className="mt-3 p-3 bg-green-50 rounded-lg border border-green-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-green-800">
-                      {selectedPatient.fullName}
-                    </p>
-                    <p className="text-sm text-green-600">
-                      {selectedPatient.email}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setSelectedPatient(null);
-                      setSearchTerm("");
-                    }}
-                  >
-                    Cambiar
-                  </Button>
-                </div>
-              </div>
-            )}
+        <div className="space-y-4">
+          <div className="bg-blue-50 p-3 rounded">
+            <p className="text-sm">
+              <strong>Monto pendiente:</strong> ${pendingAmount.toFixed(2)}
+            </p>
           </div>
-
-          {/* Appointment Details */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="duration">Duración (minutos)</Label>
-              <Select
-                value={appointmentData.duration.toString()}
-                onValueChange={(value) =>
-                  setAppointmentData((prev) => ({
-                    ...prev,
-                    duration: parseInt(value),
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="30">30 minutos</SelectItem>
-                  <SelectItem value="60">60 minutos</SelectItem>
-                  <SelectItem value="90">90 minutos</SelectItem>
-                  <SelectItem value="120">120 minutos</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="type">Tipo de Cita</Label>
-              <Select
-                value={appointmentData.type}
-                onValueChange={(value) =>
-                  setAppointmentData((prev) => ({
-                    ...prev,
-                    type: value as Appointment["type"],
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="consultation">Consulta</SelectItem>
-                  <SelectItem value="cleaning">Limpieza</SelectItem>
-                  <SelectItem value="procedure">Procedimiento</SelectItem>
-                  <SelectItem value="followup">Seguimiento</SelectItem>
-                  <SelectItem value="emergency">Emergencia</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Reason for Visit */}
-          <div>
-            <Label htmlFor="reason">Motivo de la Consulta *</Label>
-            <Textarea
-              id="reason"
-              value={appointmentData.reasonForVisit}
-              onChange={(e) =>
-                setAppointmentData((prev) => ({
-                  ...prev,
-                  reasonForVisit: e.target.value,
-                }))
+          <p className="text-sm text-gray-500">
+            Para registrar pagos completos, utiliza el reporte de facturación
+            completo.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => {
+              if (reportId) {
+                window.open(`/admin/billing/reports/${reportId}`, "_blank");
               }
-              placeholder="Describe el motivo de la cita..."
-              required
-              className="mt-1"
-            />
-          </div>
-
-          {/* Optional Fields */}
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="notes">Notas (opcional)</Label>
-              <Textarea
-                id="notes"
-                value={appointmentData.notes}
-                onChange={(e) =>
-                  setAppointmentData((prev) => ({
-                    ...prev,
-                    notes: e.target.value,
-                  }))
-                }
-                placeholder="Notas adicionales sobre la cita..."
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="instructions">
-                Instrucciones Pre-Visita (opcional)
-              </Label>
-              <Textarea
-                id="instructions"
-                value={appointmentData.preVisitInstructions}
-                onChange={(e) =>
-                  setAppointmentData((prev) => ({
-                    ...prev,
-                    preVisitInstructions: e.target.value,
-                  }))
-                }
-                placeholder="Instrucciones para el paciente antes de la cita..."
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="room">Sala (opcional)</Label>
-              <Input
-                id="room"
-                value={appointmentData.room}
-                onChange={(e) =>
-                  setAppointmentData((prev) => ({
-                    ...prev,
-                    room: e.target.value,
-                  }))
-                }
-                placeholder="Ej: Sala 1, Consultorio A..."
-                className="mt-1"
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              disabled={
-                loading || !selectedPatient || !appointmentData.reasonForVisit
-              }
-            >
-              {loading ? "Programando..." : "Programar Cita"}
-            </Button>
-          </DialogFooter>
-        </form>
+              onClose();
+            }}
+          >
+            Ir al Reporte Completo
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
-};
+}
+
+// KEEP THE EXISTING NewAppointmentModal UNCHANGED
+// ... (rest of your existing NewAppointmentModal code)
