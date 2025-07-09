@@ -4,9 +4,13 @@
 import React, { useState, useEffect } from "react";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/hooks/useAuth";
-import { getSales } from "@/lib/firebase/sales";
+import {
+  getSales,
+  Sale,
+  getDentalProductLabel,
+  getPaymentPlanLabel,
+} from "@/lib/firebase/sales"; // Updated import
 import { getAllUsers, UserProfile } from "@/lib/firebase/rbac";
-import { Sale } from "@/types/sales";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -140,30 +144,7 @@ export default function VentasPage() {
     }
   };
 
-  const getProductTypeLabel = (product: string): string => {
-    const productLabels: Record<string, string> = {
-      treatment_plan: "Plan de Tratamiento",
-      consultation: "Consulta",
-      cleaning: "Limpieza Dental",
-      whitening: "Blanqueamiento",
-      orthodontics: "Ortodoncia",
-      implant: "Implante Dental",
-      crown: "Corona",
-      filling: "Empaste",
-      extraction: "Extracción",
-      root_canal: "Endodoncia",
-      dentures: "Prótesis",
-      oral_surgery: "Cirugía Oral",
-      periodontics: "Periodoncia",
-      pediatric: "Odontopediatría",
-      cosmetic: "Odontología Estética",
-      emergency: "Emergencia Dental",
-      products: "Productos Dentales",
-      membership: "Membresía/Plan",
-      other: "Otros Servicios",
-    };
-    return productLabels[product] || product;
-  };
+  // Remove the old getProductTypeLabel function since we now import getDentalProductLabel
 
   const filteredData = salesData.filter((data) => {
     if (!searchTerm) return true;
