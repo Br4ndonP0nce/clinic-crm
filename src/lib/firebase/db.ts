@@ -10,7 +10,8 @@ import {
   Timestamp,
   doc,
   serverTimestamp,
-  limit as firestoreLimit
+  limit as firestoreLimit,
+  deleteDoc  
 } from 'firebase/firestore';
 import { db } from './config';
 
@@ -223,7 +224,31 @@ export const addPatient = async (patientData: Omit<Patient, 'id' | 'createdAt' |
     throw error;
   }
 };
-
+export const deleteAppointment = async (appointmentId: string): Promise<void> => {
+  try {
+    const appointmentRef = doc(db, APPOINTMENTS_COLLECTION, appointmentId);
+    await deleteDoc(appointmentRef);
+  } catch (error) {
+    console.error('Error deleting appointment:', error);
+    throw error;
+  }
+};
+/**
+ * Cancel multiple appointments (bulk operation)
+ * Useful for when a doctor is unavailable for a day
+ */
+export const bulkDeleteAppointments = async (appointmentIds: string[]): Promise<void> => {
+  try {
+    const deletePromises = appointmentIds.map(id => 
+      deleteDoc(doc(db, APPOINTMENTS_COLLECTION, id))
+    );
+    
+    await Promise.all(deletePromises);
+  } catch (error) {
+    console.error('Error bulk deleting appointments:', error);
+    throw error;
+  }
+};
 /**
  * Update a patient's status or data
  */
@@ -395,7 +420,24 @@ export const addAppointment = async (appointmentData: Omit<Appointment, 'id' | '
     throw error;
   }
 };
-
+/**
+ * Get a single appointment by ID
+ */
+export const getAppointment = async (appointmentId: string): Promise<Appointment | null> => {
+  try {
+    const appointmentRef = doc(db, APPOINTMENTS_COLLECTION, appointmentId);
+    const appointmentSnap = await getDoc(appointmentRef);
+    
+    if (appointmentSnap.exists()) {
+      return { id: appointmentSnap.id, ...appointmentSnap.data() } as Appointment;
+    } else {
+      return null;
+    }
+  } catch (error) {
+    console.error('Error getting appointment:', error);
+    throw error;
+  }
+};
 /**
  * Get appointments for a specific date range
  */
@@ -439,7 +481,42 @@ export const getAppointments = async (
     throw error;
   }
 };
-
+/**
+ * Get appointments by status
+ */
+export const getAppointmentsByStatus = async (
+  status: Appointment['status'],
+  doctorId?: string,
+  limit?: number
+): Promise<Appointment[]> => {
+  try {
+    let q = query(
+      collection(db, APPOINTMENTS_COLLECTION),
+      where('status', '==', status),
+      orderBy('appointmentDate', 'asc')
+    );
+    
+    if (doctorId) {
+      q = query(q, where('doctorId', '==', doctorId));
+    }
+    
+    if (limit) {
+      q = query(q, firestoreLimit(limit));
+    }
+    
+    const querySnapshot = await getDocs(q);
+    const appointments: Appointment[] = [];
+    
+    querySnapshot.forEach((doc) => {
+      appointments.push({ id: doc.id, ...doc.data() } as Appointment);
+    });
+    
+    return appointments;
+  } catch (error) {
+    console.error('Error getting appointments by status:', error);
+    throw error;
+  }
+};
 /**
  * Update appointment status
  */

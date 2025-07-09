@@ -6,6 +6,8 @@ import { getAllUsers, UserProfile } from "@/lib/firebase/rbac";
 import {
   getAppointments,
   addAppointment,
+  updateAppointment,
+  deleteAppointment,
   Appointment,
 } from "@/lib/firebase/db";
 import { getPatients, addPatient, Patient } from "@/lib/firebase/db";
@@ -16,6 +18,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Calendar as CalendarIcon,
   Plus,
@@ -31,6 +41,9 @@ import {
   Search,
   UserPlus,
   Calendar1,
+  Edit,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 
 // Calendar view types
@@ -72,6 +85,217 @@ const appointmentTypes = [
   { value: "emergency", label: "Emergencia", color: "bg-red-500" },
 ];
 
+// Appointment Details Modal Component
+interface AppointmentDetailsModalProps {
+  appointment: Appointment | null;
+  patient: Patient | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onUpdate: () => void;
+  canDelete: boolean;
+  canEdit: boolean;
+}
+
+const AppointmentDetailsModal: React.FC<AppointmentDetailsModalProps> = ({
+  appointment,
+  patient,
+  isOpen,
+  onClose,
+  onUpdate,
+  canDelete,
+  canEdit,
+}) => {
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const handleDelete = async () => {
+    if (!appointment?.id) return;
+
+    try {
+      setIsDeleting(true);
+      await deleteAppointment(appointment.id);
+      onUpdate();
+      onClose();
+      setShowDeleteConfirm(false);
+    } catch (error) {
+      console.error("Error deleting appointment:", error);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  if (!appointment || !patient) return null;
+
+  const formatDateTime = (timestamp: Timestamp) => {
+    return timestamp.toDate().toLocaleDateString("es-MX", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "scheduled":
+        return "bg-blue-100 text-blue-800";
+      case "confirmed":
+        return "bg-green-100 text-green-800";
+      case "completed":
+        return "bg-gray-100 text-gray-800";
+      case "cancelled":
+        return "bg-red-100 text-red-800";
+      default:
+        return "bg-gray-100 text-gray-800";
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center justify-between">
+            <span className="flex items-center">
+              <CalendarIcon className="mr-2 h-5 w-5" />
+              Detalles de la Cita
+            </span>
+            <div className="flex gap-2">
+              {canEdit && (
+                <Button size="sm" variant="outline">
+                  <Edit className="h-4 w-4 mr-1" />
+                  Editar
+                </Button>
+              )}
+              {canDelete && appointment.status !== "cancelled" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-red-600 hover:text-red-700"
+                  onClick={() => setShowDeleteConfirm(true)}
+                >
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Cancelar
+                </Button>
+              )}
+            </div>
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Status */}
+          <div className="flex items-center justify-between">
+            <Label>Estado:</Label>
+            <Badge className={getStatusColor(appointment.status)}>
+              {appointment.status === "scheduled" && "Programada"}
+              {appointment.status === "confirmed" && "Confirmada"}
+              {appointment.status === "completed" && "Completada"}
+              {appointment.status === "cancelled" && "Cancelada"}
+            </Badge>
+          </div>
+
+          {/* Patient Info */}
+          <div className="bg-blue-50 p-3 rounded-lg">
+            <h3 className="font-medium mb-2 flex items-center">
+              <User className="mr-2 h-4 w-4" />
+              Información del Paciente
+            </h3>
+            <div className="space-y-1 text-sm">
+              <p>
+                <strong>Nombre:</strong> {patient.fullName}
+              </p>
+              <p>
+                <strong>Teléfono:</strong> {patient.phone}
+              </p>
+              <p>
+                <strong>Email:</strong> {patient.email}
+              </p>
+            </div>
+          </div>
+
+          {/* Appointment Details */}
+          <div className="space-y-2">
+            <div>
+              <Label>Fecha y Hora:</Label>
+              <p>{formatDateTime(appointment.appointmentDate)}</p>
+            </div>
+            <div>
+              <Label>Duración:</Label>
+              <p>{appointment.duration} minutos</p>
+            </div>
+            <div>
+              <Label>Tipo:</Label>
+              <p>
+                {
+                  appointmentTypes.find((t) => t.value === appointment.type)
+                    ?.label
+                }
+              </p>
+            </div>
+            <div>
+              <Label>Motivo:</Label>
+              <p>{appointment.reasonForVisit}</p>
+            </div>
+            {appointment.notes && (
+              <div>
+                <Label>Notas:</Label>
+                <p className="whitespace-pre-wrap">{appointment.notes}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cerrar
+          </Button>
+        </DialogFooter>
+
+        {/* Delete Confirmation Modal */}
+        <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center text-red-600">
+                <AlertTriangle className="mr-2 h-5 w-5" />
+                Confirmar Cancelación
+              </DialogTitle>
+              <DialogDescription>
+                ¿Estás seguro de que quieres eliminar esta cita? Esta acción no
+                se puede deshacer y la cita será eliminada permanentemente.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="bg-red-50 p-3 rounded-lg">
+              <p className="text-sm">
+                <strong>Paciente:</strong> {patient.fullName}
+              </p>
+              <p className="text-sm">
+                <strong>Fecha:</strong>{" "}
+                {formatDateTime(appointment.appointmentDate)}
+              </p>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setShowDeleteConfirm(false)}
+              >
+                No, Mantener Cita
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? "Eliminando..." : "Sí, Eliminar Cita"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 export default function CalendarPage() {
   const { userProfile, hasPermission } = useAuth();
   const [doctors, setDoctors] = useState<UserProfile[]>([]);
@@ -81,6 +305,10 @@ export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState<CalendarView>("week");
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] =
+    useState<Appointment | null>(null);
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<{
     date: Date;
     time: string;
@@ -89,7 +317,16 @@ export default function CalendarPage() {
     useState<AppointmentFormData>(initialFormData);
   const [patientSearch, setPatientSearch] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Permission checks
+  const canDeleteAppointments =
+    hasPermission("appointments:delete") &&
+    (userProfile?.role === "doctor" ||
+      userProfile?.role === "super_admin" ||
+      userProfile?.role === "recepcion");
+  const canEditAppointments = hasPermission("appointments:write");
 
   // Load doctors and patients on mount
   useEffect(() => {
@@ -101,7 +338,7 @@ export default function CalendarPage() {
     if (selectedDoctor) {
       loadAppointments();
     }
-  }, [selectedDoctor, currentDate]);
+  }, [selectedDoctor, currentDate, view]);
 
   const loadInitialData = async () => {
     try {
@@ -136,21 +373,37 @@ export default function CalendarPage() {
     if (!selectedDoctor) return;
 
     try {
-      // Get appointments for the selected doctor and current month
-      const startOfMonth = new Date(
-        currentDate.getFullYear(),
-        currentDate.getMonth(),
-        1
-      );
-      const endOfMonth = new Date(
-        currentDate.getFullYear(),
-        currentDate.getMonth() + 1,
-        0
-      );
+      let startDate: Date, endDate: Date;
+
+      if (view === "month") {
+        startDate = new Date(
+          currentDate.getFullYear(),
+          currentDate.getMonth(),
+          1
+        );
+        endDate = new Date(
+          currentDate.getFullYear(),
+          currentDate.getMonth() + 1,
+          0
+        );
+      } else if (view === "week") {
+        const start = new Date(currentDate);
+        const day = start.getDay();
+        const diff = start.getDate() - day + (day === 0 ? -6 : 1);
+        start.setDate(diff);
+        startDate = start;
+        endDate = new Date(start);
+        endDate.setDate(start.getDate() + 6);
+      } else {
+        startDate = new Date(currentDate);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(currentDate);
+        endDate.setHours(23, 59, 59, 999);
+      }
 
       const doctorAppointments = await getAppointments(
-        startOfMonth,
-        endOfMonth,
+        startDate,
+        endDate,
         selectedDoctor
       );
       setAppointments(doctorAppointments);
@@ -168,6 +421,15 @@ export default function CalendarPage() {
       time: time,
     });
     setShowAppointmentModal(true);
+  };
+
+  const handleAppointmentClick = (appointment: Appointment) => {
+    const patient = patients.find((p) => p.id === appointment.patientId);
+    if (patient) {
+      setSelectedAppointment(appointment);
+      setSelectedPatient(patient);
+      setShowDetailsModal(true);
+    }
   };
 
   const handlePatientSelect = (patient: Patient) => {
@@ -194,7 +456,7 @@ export default function CalendarPage() {
     if (!selectedDoctor) return;
 
     try {
-      setIsLoading(true);
+      setIsSaving(true);
       let patientId = formData.patientId;
 
       // Create new patient if needed
@@ -207,9 +469,8 @@ export default function CalendarPage() {
           lastName,
           email: formData.patientEmail,
           phone: formData.patientPhone,
-          dateOfBirth: Timestamp.fromDate(new Date("1990-01-01")), // Default date
+          dateOfBirth: Timestamp.fromDate(new Date("1990-01-01")),
           gender: "prefer_not_to_say" as const,
-
           address: {
             street: "",
             city: "",
@@ -217,24 +478,20 @@ export default function CalendarPage() {
             zipCode: "",
             country: "México",
           },
-
           emergencyContact: {
             name: "",
             relationship: "",
             phone: "",
           },
-
           insurance: {
             isActive: false,
           },
-
           medicalHistory: {
             allergies: [],
             medications: [],
             medicalConditions: [],
             surgeries: [],
           },
-
           dentalHistory: {
             reasonForVisit: formData.reasonForVisit,
             oralHygiene: "good" as const,
@@ -242,9 +499,7 @@ export default function CalendarPage() {
             flossingFrequency: "daily" as const,
             currentProblems: [],
           },
-
           status: "scheduled" as const,
-
           preferences: {
             preferredTimeSlots: [],
             preferredDays: [],
@@ -255,16 +510,13 @@ export default function CalendarPage() {
               days: 1,
             },
           },
-
           financial: {
             paymentMethod: "cash" as const,
             balance: 0,
           },
-
           createdBy: userProfile?.uid || "unknown",
           notes: `Paciente creado desde calendario - ${formData.notes}`,
           statusHistory: [],
-
           consents: {
             treatmentConsent: false,
             privacyPolicy: false,
@@ -302,7 +554,7 @@ export default function CalendarPage() {
       console.error("Error creating appointment:", err);
       setError("Error al crear la cita");
     } finally {
-      setIsLoading(false);
+      setIsSaving(false);
     }
   };
 
@@ -322,7 +574,7 @@ export default function CalendarPage() {
   const getWeekDays = () => {
     const start = new Date(currentDate);
     const day = start.getDay();
-    const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Monday as first day
+    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
     start.setDate(diff);
 
     const days = [];
@@ -334,6 +586,32 @@ export default function CalendarPage() {
     return days;
   };
 
+  const getMonthDays = () => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+
+    // First day of the month
+    const firstDay = new Date(year, month, 1);
+    // Last day of the month
+    const lastDay = new Date(year, month + 1, 0);
+
+    // Start from the Monday of the week containing the first day
+    const startDate = new Date(firstDay);
+    const startDay = firstDay.getDay();
+    const daysFromMonday = startDay === 0 ? 6 : startDay - 1;
+    startDate.setDate(firstDay.getDate() - daysFromMonday);
+
+    // Generate 42 days (6 weeks) to fill the calendar
+    const days = [];
+    for (let i = 0; i < 42; i++) {
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() + i);
+      days.push(date);
+    }
+
+    return days;
+  };
+
   const getAppointmentForSlot = (date: Date, time: string) => {
     const slotDateTime = new Date(
       `${date.toISOString().split("T")[0]}T${time}`
@@ -341,6 +619,13 @@ export default function CalendarPage() {
     return appointments.find((apt) => {
       const aptDate = apt.appointmentDate.toDate();
       return aptDate.getTime() === slotDateTime.getTime();
+    });
+  };
+
+  const getAppointmentsForDay = (date: Date) => {
+    return appointments.filter((apt) => {
+      const aptDate = apt.appointmentDate.toDate();
+      return aptDate.toDateString() === date.toDateString();
     });
   };
 
@@ -375,6 +660,7 @@ export default function CalendarPage() {
 
   const timeSlots = generateTimeSlots();
   const weekDays = getWeekDays();
+  const monthDays = getMonthDays();
   const selectedDoctorInfo = doctors.find((d) => d.uid === selectedDoctor);
 
   return (
@@ -465,7 +751,14 @@ export default function CalendarPage() {
                             month: "short",
                             year: "numeric",
                           })}`
+                        : view === "month"
+                        ? currentDate.toLocaleDateString("es-MX", {
+                            month: "long",
+                            year: "numeric",
+                          })
                         : currentDate.toLocaleDateString("es-MX", {
+                            weekday: "long",
+                            day: "numeric",
                             month: "long",
                             year: "numeric",
                           })}
@@ -503,6 +796,13 @@ export default function CalendarPage() {
                     >
                       Mes
                     </Button>
+                    <Button
+                      variant={view === "day" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setView("day")}
+                    >
+                      Día
+                    </Button>
                   </div>
                 </div>
 
@@ -523,6 +823,125 @@ export default function CalendarPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Month View Calendar */}
+            {view === "month" && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Calendar1 className="mr-2 h-5 w-5" />
+                    Calendario Mensual - {selectedDoctorInfo?.displayName}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="grid grid-cols-7 border-b">
+                    {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map(
+                      (day) => (
+                        <div
+                          key={day}
+                          className="p-3 border-r bg-gray-50 text-center font-medium"
+                        >
+                          {day}
+                        </div>
+                      )
+                    )}
+                  </div>
+                  <div className="grid grid-cols-7">
+                    {monthDays.map((date, index) => {
+                      const isCurrentMonth =
+                        date.getMonth() === currentDate.getMonth();
+                      const isToday =
+                        date.toDateString() === new Date().toDateString();
+                      const dayAppointments = getAppointmentsForDay(date);
+                      const isWeekend =
+                        date.getDay() === 0 || date.getDay() === 6;
+
+                      return (
+                        <div
+                          key={index}
+                          className={`min-h-[120px] p-2 border-r border-b ${
+                            !isCurrentMonth
+                              ? "bg-gray-50 text-gray-400"
+                              : isToday
+                              ? "bg-blue-50"
+                              : isWeekend
+                              ? "bg-gray-100"
+                              : "bg-white hover:bg-gray-50"
+                          } ${
+                            hasPermission("appointments:write") &&
+                            isCurrentMonth &&
+                            !isWeekend
+                              ? "cursor-pointer"
+                              : ""
+                          }`}
+                          onClick={() => {
+                            if (
+                              hasPermission("appointments:write") &&
+                              isCurrentMonth &&
+                              !isWeekend
+                            ) {
+                              handleTimeSlotClick(date, "09:00");
+                            }
+                          }}
+                        >
+                          <div
+                            className={`text-sm font-medium mb-1 ${
+                              isToday ? "text-blue-600" : ""
+                            }`}
+                          >
+                            {date.getDate()}
+                          </div>
+                          <div className="space-y-1">
+                            {dayAppointments.slice(0, 3).map((appointment) => {
+                              const appointmentType = appointmentTypes.find(
+                                (t) => t.value === appointment.type
+                              );
+                              const patient = patients.find(
+                                (p) => p.id === appointment.patientId
+                              );
+
+                              return (
+                                <div
+                                  key={appointment.id}
+                                  className={`text-xs p-1 rounded text-white cursor-pointer ${
+                                    appointmentType?.color || "bg-gray-500"
+                                  } ${
+                                    appointment.status === "cancelled"
+                                      ? "opacity-50"
+                                      : ""
+                                  }`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAppointmentClick(appointment);
+                                  }}
+                                >
+                                  <div className="truncate font-medium">
+                                    {appointment.appointmentDate
+                                      .toDate()
+                                      .toLocaleTimeString("es-MX", {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })}
+                                  </div>
+                                  <div className="truncate">
+                                    {patient?.fullName || "Paciente"}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {dayAppointments.length > 3 && (
+                              <div className="text-xs text-gray-500 text-center">
+                                +{dayAppointments.length - 3} más
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Week View Calendar */}
             {view === "week" && (
@@ -616,22 +1035,30 @@ export default function CalendarPage() {
                                     isWeekend
                                       ? "bg-gray-100"
                                       : appointment
-                                      ? "cursor-default"
+                                      ? "cursor-pointer"
                                       : hasPermission("appointments:write")
                                       ? "cursor-pointer hover:bg-blue-50"
                                       : ""
                                   }`}
-                                  onClick={() =>
-                                    !appointment &&
-                                    !isWeekend &&
-                                    hasPermission("appointments:write") &&
-                                    handleTimeSlotClick(day, time)
-                                  }
+                                  onClick={() => {
+                                    if (appointment) {
+                                      handleAppointmentClick(appointment);
+                                    } else if (
+                                      !isWeekend &&
+                                      hasPermission("appointments:write")
+                                    ) {
+                                      handleTimeSlotClick(day, time);
+                                    }
+                                  }}
                                 >
                                   {appointment ? (
                                     <div
                                       className={`p-2 rounded text-white text-xs ${
                                         appointmentType?.color || "bg-gray-500"
+                                      } ${
+                                        appointment.status === "cancelled"
+                                          ? "opacity-50"
+                                          : ""
                                       } relative group`}
                                     >
                                       <div className="font-medium truncate">
@@ -675,25 +1102,92 @@ export default function CalendarPage() {
               </Card>
             )}
 
-            {/* Month View Calendar */}
-            {view === "month" && (
+            {/* Day View Calendar */}
+            {view === "day" && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
                     <Calendar1 className="mr-2 h-5 w-5" />
-                    Calendario Mensual - {selectedDoctorInfo?.displayName}
+                    Vista Diaria -{" "}
+                    {currentDate.toLocaleDateString("es-MX", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    })}
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="text-center py-8">
-                    <Calendar1 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-600 mb-2">
-                      Vista Mensual
-                    </h3>
-                    <p className="text-gray-500">
-                      La vista mensual estará disponible en una próxima
-                      actualización
-                    </p>
+                <CardContent className="p-0">
+                  <div className="max-h-[600px] overflow-y-auto">
+                    {timeSlots.map((time) => {
+                      const appointment = getAppointmentForSlot(
+                        currentDate,
+                        time
+                      );
+                      const appointmentType = appointmentTypes.find(
+                        (t) => t.value === appointment?.type
+                      );
+                      const patientInfo = appointment
+                        ? patients.find((p) => p.id === appointment.patientId)
+                        : null;
+
+                      return (
+                        <div
+                          key={time}
+                          className="flex border-b hover:bg-gray-50"
+                        >
+                          <div className="w-20 p-4 border-r bg-gray-50 text-center">
+                            <span className="text-sm font-medium">{time}</span>
+                          </div>
+                          <div
+                            className={`flex-1 p-2 min-h-[80px] ${
+                              appointment
+                                ? "cursor-pointer"
+                                : hasPermission("appointments:write")
+                                ? "cursor-pointer hover:bg-blue-50"
+                                : ""
+                            }`}
+                            onClick={() => {
+                              if (appointment) {
+                                handleAppointmentClick(appointment);
+                              } else if (hasPermission("appointments:write")) {
+                                handleTimeSlotClick(currentDate, time);
+                              }
+                            }}
+                          >
+                            {appointment ? (
+                              <div
+                                className={`p-3 rounded text-white ${
+                                  appointmentType?.color || "bg-gray-500"
+                                } ${
+                                  appointment.status === "cancelled"
+                                    ? "opacity-50"
+                                    : ""
+                                }`}
+                              >
+                                <div className="font-medium">
+                                  {patientInfo?.fullName ||
+                                    "Paciente Desconocido"}
+                                </div>
+                                <div className="text-sm opacity-90">
+                                  {appointmentType?.label}
+                                </div>
+                                <div className="text-sm opacity-75">
+                                  {appointment.duration} min -{" "}
+                                  {appointment.reasonForVisit}
+                                </div>
+                              </div>
+                            ) : (
+                              hasPermission("appointments:write") && (
+                                <div className="w-full h-full flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                                  <Plus className="h-6 w-6 text-gray-400" />
+                                </div>
+                              )
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>
@@ -791,12 +1285,36 @@ export default function CalendarPage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setShowAppointmentModal(false)}
+                  onClick={() => {
+                    setShowAppointmentModal(false);
+                    setSelectedTimeSlot(null);
+                    setFormData(initialFormData);
+                    setPatientSearch("");
+                  }}
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Selected Time Display */}
+                {selectedTimeSlot && (
+                  <div className="bg-blue-50 p-3 rounded-lg">
+                    <h3 className="font-medium mb-1 flex items-center">
+                      <Clock className="mr-2 h-4 w-4" />
+                      Horario Seleccionado
+                    </h3>
+                    <p className="text-sm">
+                      {selectedTimeSlot.date.toLocaleDateString("es-MX", {
+                        weekday: "long",
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      })}{" "}
+                      a las {selectedTimeSlot.time}
+                    </p>
+                  </div>
+                )}
+
                 {/* Patient Selection */}
                 <div>
                   <Label>Seleccionar Paciente</Label>
@@ -907,6 +1425,7 @@ export default function CalendarPage() {
                       onChange={(e) =>
                         setFormData({ ...formData, date: e.target.value })
                       }
+                      disabled={!!selectedTimeSlot} // Disable if coming from time slot selection
                     />
                   </div>
                   <div>
@@ -918,6 +1437,7 @@ export default function CalendarPage() {
                       onChange={(e) =>
                         setFormData({ ...formData, time: e.target.value })
                       }
+                      disabled={!!selectedTimeSlot} // Disable if coming from time slot selection
                     />
                   </div>
                 </div>
@@ -995,21 +1515,26 @@ export default function CalendarPage() {
                 <div className="flex justify-end space-x-2 pt-4">
                   <Button
                     variant="outline"
-                    onClick={() => setShowAppointmentModal(false)}
+                    onClick={() => {
+                      setShowAppointmentModal(false);
+                      setSelectedTimeSlot(null);
+                      setFormData(initialFormData);
+                      setPatientSearch("");
+                    }}
                   >
                     Cancelar
                   </Button>
                   <Button
                     onClick={handleSubmitAppointment}
                     disabled={
-                      isLoading ||
+                      isSaving ||
                       !formData.patientName ||
                       !formData.date ||
                       !formData.time ||
                       !formData.reasonForVisit
                     }
                   >
-                    {isLoading ? (
+                    {isSaving ? (
                       <div className="flex items-center">
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                         Guardando...
@@ -1026,6 +1551,21 @@ export default function CalendarPage() {
             </Card>
           </div>
         )}
+
+        {/* Appointment Details Modal */}
+        <AppointmentDetailsModal
+          appointment={selectedAppointment}
+          patient={selectedPatient}
+          isOpen={showDetailsModal}
+          onClose={() => {
+            setShowDetailsModal(false);
+            setSelectedAppointment(null);
+            setSelectedPatient(null);
+          }}
+          onUpdate={loadAppointments}
+          canDelete={canDeleteAppointments}
+          canEdit={canEditAppointments}
+        />
       </div>
     </ProtectedRoute>
   );

@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   addAppointment,
   updateAppointment,
+  deleteAppointment,
   getPatients,
   Patient,
   Appointment,
@@ -52,10 +53,11 @@ import {
   XCircle,
   Edit3,
   Trash2,
+  AlertTriangle,
 } from "lucide-react";
 
 // ============================================================================
-// APPOINTMENT DETAILS MODAL
+// APPOINTMENT DETAILS MODAL WITH DELETE FUNCTIONALITY
 // ============================================================================
 
 interface AppointmentDetailsModalProps {
@@ -70,10 +72,19 @@ export const AppointmentDetailsModal: React.FC<
 > = ({ event, open, onClose, onUpdate }) => {
   const { userProfile, hasPermission } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [appointmentData, setAppointmentData] = useState<Partial<Appointment>>(
     {}
   );
+
+  // Check if user can delete appointments (doctor, super_admin, or recepcion)
+  const canDelete =
+    hasPermission("appointments:delete") &&
+    (userProfile?.role === "doctor" ||
+      userProfile?.role === "super_admin" ||
+      userProfile?.role === "recepcion");
 
   useEffect(() => {
     if (event?.resource.appointment) {
@@ -116,6 +127,25 @@ export const AppointmentDetailsModal: React.FC<
     }
   };
 
+  const handleDeleteAppointment = async () => {
+    if (!appointment.id || !userProfile) return;
+
+    try {
+      setIsDeleting(true);
+
+      // Hard delete the appointment from the database
+      await deleteAppointment(appointment.id);
+
+      onUpdate?.();
+      onClose();
+      setShowDeleteConfirm(false);
+    } catch (error) {
+      console.error("Error deleting appointment:", error);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const formatDateTime = (date: Date | Timestamp) => {
     const jsDate = date instanceof Date ? date : date.toDate();
     return new Intl.DateTimeFormat("es-MX", {
@@ -131,258 +161,333 @@ export const AppointmentDetailsModal: React.FC<
   const statusStyle = getAppointmentStatusStyle(appointment.status);
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center">
-            <Calendar className="mr-2 h-5 w-5" />
-            Detalles de la Cita
-          </DialogTitle>
-          <DialogDescription>
-            Información completa de la cita programada
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-6">
-          {/* Appointment Status */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              {getStatusIcon(appointment.status)}
-              <Badge className={statusStyle.className}>
-                {getAppointmentStatusLabel(appointment.status)}
-              </Badge>
-            </div>
-
-            {hasPermission("appointments:write") && (
+    <>
+      <Dialog open={open} onOpenChange={onClose}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span className="flex items-center">
+                <Calendar className="mr-2 h-5 w-5" />
+                Detalles de la Cita
+              </span>
               <div className="flex space-x-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setIsEditing(true)}
-                >
-                  <Edit3 className="h-4 w-4 mr-1" />
-                  Editar
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {/* Patient Information */}
-          <div className="bg-blue-50 rounded-lg p-4">
-            <h3 className="font-semibold flex items-center mb-3">
-              <User className="mr-2 h-4 w-4" />
-              Información del Paciente
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-              <div className="flex items-center">
-                <User className="mr-2 h-3 w-3 text-gray-500" />
-                <span className="font-medium">{patient.fullName}</span>
-              </div>
-              <div className="flex items-center">
-                <Mail className="mr-2 h-3 w-3 text-gray-500" />
-                <a
-                  href={`mailto:${patient.email}`}
-                  className="text-blue-600 hover:underline"
-                >
-                  {patient.email}
-                </a>
-              </div>
-              <div className="flex items-center">
-                <Phone className="mr-2 h-3 w-3 text-gray-500" />
-                <a
-                  href={`tel:${patient.phone}`}
-                  className="text-blue-600 hover:underline"
-                >
-                  {patient.phone}
-                </a>
-              </div>
-              <div className="flex items-center">
-                <Calendar className="mr-2 h-3 w-3 text-gray-500" />
-                <span>
-                  Última visita:{" "}
-                  {patient.dentalHistory.lastVisit
-                    ? patient.dentalHistory.lastVisit
-                        .toDate()
-                        .toLocaleDateString("es-MX")
-                    : "Primera visita"}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Appointment Details */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label className="text-sm font-medium text-gray-600">
-                Fecha y Hora
-              </Label>
-              <p className="mt-1">
-                {formatDateTime(appointment.appointmentDate)}
-              </p>
-            </div>
-            <div>
-              <Label className="text-sm font-medium text-gray-600">
-                Duración
-              </Label>
-              <p className="mt-1">{appointment.duration} minutos</p>
-            </div>
-            <div>
-              <Label className="text-sm font-medium text-gray-600">
-                Tipo de Cita
-              </Label>
-              <p className="mt-1">
-                {getAppointmentTypeLabel(appointment.type)}
-              </p>
-            </div>
-            <div>
-              <Label className="text-sm font-medium text-gray-600">
-                Doctor
-              </Label>
-              <p className="mt-1">Dr. {appointment.doctorId}</p>
-            </div>
-          </div>
-
-          {/* Reason for Visit */}
-          <div>
-            <Label className="text-sm font-medium text-gray-600">
-              Motivo de la Consulta
-            </Label>
-            <p className="mt-1 p-3 bg-gray-50 rounded">
-              {appointment.reasonForVisit}
-            </p>
-          </div>
-
-          {/* Notes */}
-          {appointment.notes && (
-            <div>
-              <Label className="text-sm font-medium text-gray-600">Notas</Label>
-              <p className="mt-1 p-3 bg-gray-50 rounded">{appointment.notes}</p>
-            </div>
-          )}
-
-          {/* Pre-visit Instructions */}
-          {appointment.preVisitInstructions && (
-            <div>
-              <Label className="text-sm font-medium text-gray-600">
-                Instrucciones Pre-Visita
-              </Label>
-              <p className="mt-1 p-3 bg-amber-50 rounded border-l-4 border-amber-400">
-                {appointment.preVisitInstructions}
-              </p>
-            </div>
-          )}
-
-          {/* Room and Equipment */}
-          {(appointment.room || appointment.equipment) && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {appointment.room && (
-                <div>
-                  <Label className="text-sm font-medium text-gray-600">
-                    Sala
-                  </Label>
-                  <p className="mt-1 flex items-center">
-                    <MapPin className="mr-2 h-4 w-4 text-gray-500" />
-                    {appointment.room}
-                  </p>
-                </div>
-              )}
-              {appointment.equipment && appointment.equipment.length > 0 && (
-                <div>
-                  <Label className="text-sm font-medium text-gray-600">
-                    Equipo
-                  </Label>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {appointment.equipment.map((item, index) => (
-                      <Badge key={index} variant="outline" className="text-xs">
-                        {item}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Quick Actions */}
-          {hasPermission("appointments:write") &&
-            appointment.status !== "completed" &&
-            appointment.status !== "cancelled" && (
-              <div className="border-t pt-4">
-                <Label className="text-sm font-medium text-gray-600 mb-3 block">
-                  Acciones Rápidas
-                </Label>
-                <div className="flex flex-wrap gap-2">
-                  {appointment.status === "scheduled" && (
-                    <Button
-                      size="sm"
-                      onClick={() => handleStatusUpdate("confirmed")}
-                      disabled={loading}
-                      className="bg-green-600 hover:bg-green-700"
-                    >
-                      <CheckCircle className="mr-1 h-3 w-3" />
-                      Confirmar
-                    </Button>
-                  )}
-                  {(appointment.status === "scheduled" ||
-                    appointment.status === "confirmed") && (
-                    <Button
-                      size="sm"
-                      onClick={() => handleStatusUpdate("in_progress")}
-                      disabled={loading}
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
-                      <Clock className="mr-1 h-3 w-3" />
-                      Iniciar
-                    </Button>
-                  )}
-                  {appointment.status === "in_progress" && (
-                    <Button
-                      size="sm"
-                      onClick={() => handleStatusUpdate("completed")}
-                      disabled={loading}
-                      className="bg-gray-600 hover:bg-gray-700"
-                    >
-                      <CheckCircle className="mr-1 h-3 w-3" />
-                      Completar
-                    </Button>
-                  )}
+                {hasPermission("appointments:write") && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleStatusUpdate("cancelled")}
-                    disabled={loading}
+                    onClick={() => setIsEditing(true)}
+                  >
+                    <Edit3 className="h-4 w-4 mr-1" />
+                    Editar
+                  </Button>
+                )}
+                {canDelete && appointment.status !== "cancelled" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowDeleteConfirm(true)}
                     className="text-red-600 hover:text-red-700 hover:bg-red-50"
                   >
-                    <XCircle className="mr-1 h-3 w-3" />
+                    <Trash2 className="h-4 w-4 mr-1" />
                     Cancelar
                   </Button>
+                )}
+              </div>
+            </DialogTitle>
+            <DialogDescription>
+              Información completa de la cita programada
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {/* Appointment Status */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                {getStatusIcon(appointment.status)}
+                <Badge className={statusStyle.className}>
+                  {getAppointmentStatusLabel(appointment.status)}
+                </Badge>
+              </div>
+            </div>
+
+            {/* Patient Information */}
+            <div className="bg-blue-50 rounded-lg p-4">
+              <h3 className="font-semibold flex items-center mb-3">
+                <User className="mr-2 h-4 w-4" />
+                Información del Paciente
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div className="flex items-center">
+                  <User className="mr-2 h-3 w-3 text-gray-500" />
+                  <span className="font-medium">{patient.fullName}</span>
+                </div>
+                <div className="flex items-center">
+                  <Mail className="mr-2 h-3 w-3 text-gray-500" />
+                  <a
+                    href={`mailto:${patient.email}`}
+                    className="text-blue-600 hover:underline"
+                  >
+                    {patient.email}
+                  </a>
+                </div>
+                <div className="flex items-center">
+                  <Phone className="mr-2 h-3 w-3 text-gray-500" />
+                  <a
+                    href={`tel:${patient.phone}`}
+                    className="text-blue-600 hover:underline"
+                  >
+                    {patient.phone}
+                  </a>
+                </div>
+                <div className="flex items-center">
+                  <Calendar className="mr-2 h-3 w-3 text-gray-500" />
+                  <span>
+                    Última visita:{" "}
+                    {patient.dentalHistory.lastVisit
+                      ? patient.dentalHistory.lastVisit
+                          .toDate()
+                          .toLocaleDateString("es-MX")
+                      : "Primera visita"}
+                  </span>
                 </div>
               </div>
-            )}
-        </div>
+            </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cerrar
-          </Button>
-          {hasPermission("appointments:write") && (
-            <Button
-              onClick={() => {
-                window.location.href = `/admin/patients/${patient.id}`;
-              }}
-            >
-              <User className="mr-2 h-4 w-4" />
-              Ver Perfil del Paciente
+            {/* Appointment Details */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-600">
+                  Fecha y Hora
+                </Label>
+                <p className="mt-1">
+                  {formatDateTime(appointment.appointmentDate)}
+                </p>
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-600">
+                  Duración
+                </Label>
+                <p className="mt-1">{appointment.duration} minutos</p>
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-600">
+                  Tipo de Cita
+                </Label>
+                <p className="mt-1">
+                  {getAppointmentTypeLabel(appointment.type)}
+                </p>
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-600">
+                  Doctor
+                </Label>
+                <p className="mt-1">Dr. {appointment.doctorId}</p>
+              </div>
+            </div>
+
+            {/* Reason for Visit */}
+            <div>
+              <Label className="text-sm font-medium text-gray-600">
+                Motivo de la Consulta
+              </Label>
+              <p className="mt-1 p-3 bg-gray-50 rounded">
+                {appointment.reasonForVisit}
+              </p>
+            </div>
+
+            {/* Notes */}
+            {appointment.notes && (
+              <div>
+                <Label className="text-sm font-medium text-gray-600">
+                  Notas
+                </Label>
+                <p className="mt-1 p-3 bg-gray-50 rounded whitespace-pre-wrap">
+                  {appointment.notes}
+                </p>
+              </div>
+            )}
+
+            {/* Pre-visit Instructions */}
+            {appointment.preVisitInstructions && (
+              <div>
+                <Label className="text-sm font-medium text-gray-600">
+                  Instrucciones Pre-Visita
+                </Label>
+                <p className="mt-1 p-3 bg-amber-50 rounded border-l-4 border-amber-400">
+                  {appointment.preVisitInstructions}
+                </p>
+              </div>
+            )}
+
+            {/* Room and Equipment */}
+            {(appointment.room || appointment.equipment) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {appointment.room && (
+                  <div>
+                    <Label className="text-sm font-medium text-gray-600">
+                      Sala
+                    </Label>
+                    <p className="mt-1 flex items-center">
+                      <MapPin className="mr-2 h-4 w-4 text-gray-500" />
+                      {appointment.room}
+                    </p>
+                  </div>
+                )}
+                {appointment.equipment && appointment.equipment.length > 0 && (
+                  <div>
+                    <Label className="text-sm font-medium text-gray-600">
+                      Equipo
+                    </Label>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {appointment.equipment.map((item, index) => (
+                        <Badge
+                          key={index}
+                          variant="outline"
+                          className="text-xs"
+                        >
+                          {item}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Quick Actions */}
+            {hasPermission("appointments:write") &&
+              appointment.status !== "completed" &&
+              appointment.status !== "cancelled" && (
+                <div className="border-t pt-4">
+                  <Label className="text-sm font-medium text-gray-600 mb-3 block">
+                    Acciones Rápidas
+                  </Label>
+                  <div className="flex flex-wrap gap-2">
+                    {appointment.status === "scheduled" && (
+                      <Button
+                        size="sm"
+                        onClick={() => handleStatusUpdate("confirmed")}
+                        disabled={loading}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        <CheckCircle className="mr-1 h-3 w-3" />
+                        Confirmar
+                      </Button>
+                    )}
+                    {(appointment.status === "scheduled" ||
+                      appointment.status === "confirmed") && (
+                      <Button
+                        size="sm"
+                        onClick={() => handleStatusUpdate("in_progress")}
+                        disabled={loading}
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        <Clock className="mr-1 h-3 w-3" />
+                        Iniciar
+                      </Button>
+                    )}
+                    {appointment.status === "in_progress" && (
+                      <Button
+                        size="sm"
+                        onClick={() => handleStatusUpdate("completed")}
+                        disabled={loading}
+                        className="bg-gray-600 hover:bg-gray-700"
+                      >
+                        <CheckCircle className="mr-1 h-3 w-3" />
+                        Completar
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>
+              Cerrar
             </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            {hasPermission("appointments:write") && (
+              <Button
+                onClick={() => {
+                  window.location.href = `/admin/patients/${patient.id}`;
+                }}
+              >
+                <User className="mr-2 h-4 w-4" />
+                Ver Perfil del Paciente
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Modal */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center text-red-600">
+              <AlertTriangle className="mr-2 h-5 w-5" />
+              Confirmar Eliminación
+            </DialogTitle>
+            <DialogDescription>
+              ¿Estás seguro de que quieres eliminar esta cita? Esta acción no se
+              puede deshacer y la cita será eliminada permanentemente de la base
+              de datos.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="bg-red-50 p-3 rounded-lg">
+            <div className="space-y-1 text-sm">
+              <p>
+                <strong>Paciente:</strong> {patient.fullName}
+              </p>
+              <p>
+                <strong>Fecha:</strong>{" "}
+                {formatDateTime(appointment.appointmentDate)}
+              </p>
+              <p>
+                <strong>Tipo:</strong>{" "}
+                {getAppointmentTypeLabel(appointment.type)}
+              </p>
+              <p>
+                <strong>Motivo:</strong> {appointment.reasonForVisit}
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteConfirm(false)}
+              disabled={isDeleting}
+            >
+              No, Mantener Cita
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteAppointment}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <div className="flex items-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Eliminando...
+                </div>
+              ) : (
+                <>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Sí, Eliminar Cita
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 
 // ============================================================================
-// NEW APPOINTMENT MODAL
+// NEW APPOINTMENT MODAL WITH DISABLED DATE/TIME WHEN FROM SLOT
 // ============================================================================
 
 interface NewAppointmentModalProps {
@@ -390,6 +495,8 @@ interface NewAppointmentModalProps {
   onClose: () => void;
   selectedSlot?: SlotInfo | null;
   onSuccess: () => void;
+  prefilledDate?: string;
+  prefilledTime?: string;
 }
 
 export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
@@ -397,6 +504,8 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
   onClose,
   selectedSlot,
   onSuccess,
+  prefilledDate,
+  prefilledTime,
 }) => {
   const { userProfile } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -404,10 +513,21 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
 
+  // Determine if date/time should be disabled (when coming from slot selection)
+  const isDateTimeDisabled = !!(
+    selectedSlot ||
+    (prefilledDate && prefilledTime)
+  );
+
   const [appointmentData, setAppointmentData] = useState({
     patientId: "",
     doctorId: userProfile?.uid || "",
-    appointmentDate: Timestamp.fromDate(selectedSlot?.start || new Date()),
+    appointmentDate: Timestamp.fromDate(
+      selectedSlot?.start ||
+        (prefilledDate && prefilledTime
+          ? new Date(`${prefilledDate}T${prefilledTime}`)
+          : new Date())
+    ),
     duration: 60,
     type: "consultation" as Appointment["type"],
     reasonForVisit: "",
@@ -416,6 +536,17 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
     room: "",
     equipment: [] as string[],
   });
+
+  // Date and time form fields (separate from appointmentData for form display)
+  const [formDate, setFormDate] = useState(
+    prefilledDate ||
+      selectedSlot?.start.toISOString().split("T")[0] ||
+      new Date().toISOString().split("T")[0]
+  );
+
+  const [formTime, setFormTime] = useState(
+    prefilledTime || selectedSlot?.start.toTimeString().slice(0, 5) || "09:00"
+  );
 
   // Fetch patients on component mount
   useEffect(() => {
@@ -433,9 +564,24 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
     }
   }, [open]);
 
-  // Update appointment date when slot changes
+  // Update appointment date when form date/time changes
+  useEffect(() => {
+    if (formDate && formTime) {
+      const newDateTime = new Date(`${formDate}T${formTime}`);
+      setAppointmentData((prev) => ({
+        ...prev,
+        appointmentDate: Timestamp.fromDate(newDateTime),
+      }));
+    }
+  }, [formDate, formTime]);
+
+  // Update form when slot changes
   useEffect(() => {
     if (selectedSlot) {
+      const slotDate = selectedSlot.start.toISOString().split("T")[0];
+      const slotTime = selectedSlot.start.toTimeString().slice(0, 5);
+      setFormDate(slotDate);
+      setFormTime(slotTime);
       setAppointmentData((prev) => ({
         ...prev,
         appointmentDate: Timestamp.fromDate(selectedSlot.start),
@@ -480,6 +626,8 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
       });
       setSelectedPatient(null);
       setSearchTerm("");
+      setFormDate(new Date().toISOString().split("T")[0]);
+      setFormTime("09:00");
 
       onSuccess();
       onClose();
@@ -515,16 +663,45 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Date and Time */}
-          <div className="bg-blue-50 rounded-lg p-4">
-            <h3 className="font-medium mb-2 flex items-center">
-              <Clock className="mr-2 h-4 w-4" />
-              Fecha y Hora Seleccionada
-            </h3>
-            <p className="text-sm">
-              {formatDateTime(appointmentData.appointmentDate.toDate())}
-            </p>
-          </div>
+          {/* Date and Time Display/Input */}
+          {isDateTimeDisabled ? (
+            <div className="bg-blue-50 rounded-lg p-4">
+              <h3 className="font-medium mb-2 flex items-center">
+                <Clock className="mr-2 h-4 w-4" />
+                Fecha y Hora Seleccionada
+              </h3>
+              <p className="text-sm">
+                {formatDateTime(appointmentData.appointmentDate.toDate())}
+              </p>
+              <p className="text-xs text-blue-600 mt-1">
+                Para cambiar la fecha/hora, cierra este modal y selecciona un
+                horario diferente en el calendario
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="appointment-date">Fecha *</Label>
+                <Input
+                  id="appointment-date"
+                  type="date"
+                  value={formDate}
+                  onChange={(e) => setFormDate(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="appointment-time">Hora *</Label>
+                <Input
+                  id="appointment-time"
+                  type="time"
+                  value={formTime}
+                  onChange={(e) => setFormTime(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+          )}
 
           {/* Patient Selection */}
           <div>
