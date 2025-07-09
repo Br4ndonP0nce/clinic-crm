@@ -17,7 +17,8 @@ import {
     QueryDocumentSnapshot,
     deleteDoc
   } from 'firebase/firestore';
-  import { db } from './config';
+import { db } from './config';
+  
   import { 
     BillingReport, 
     BillingPayment, 
@@ -29,7 +30,8 @@ import {
     ServiceCategoryBreakdown,
     MonthlyTrend,
     generateInvoiceNumber,
-    MEXICAN_TAX_RATE
+  MEXICAN_TAX_RATE,
+    BillingService
   } from '@/types/billing';
   import { getAppointment, Patient, Appointment } from './db';
   import { getUserProfile } from './rbac';
@@ -64,11 +66,37 @@ import {
         throw new Error('Appointment not found');
       }
   
+      // Get current timestamp for consistent use
+      const now = Timestamp.now();
+  
       // Calculate initial totals
       const services = initialServices || [];
       const subtotal = services.reduce((sum, service) => sum + (service.quantity * service.unitPrice), 0);
       const tax = Math.round(subtotal * MEXICAN_TAX_RATE * 100) / 100;
       const total = subtotal + tax;
+  
+      // Prepare services array with proper structure
+      const billingServices: BillingService[] = services.map((service, index) => ({
+        id: `service_${index + 1}`,
+        description: service.description,
+        quantity: service.quantity,
+        unitPrice: service.unitPrice,
+        total: service.quantity * service.unitPrice,
+        procedureCode: service.procedureCode,
+        tooth: service.tooth,
+        category: service.category as any,
+        providedBy: appointment.doctorId
+      }));
+  
+      // Prepare status history entry with proper timestamp
+      const statusHistoryEntry: BillingStatusHistory = {
+        id: `history_${Date.now()}`,
+        previousStatus: 'draft' as any,
+        newStatus: 'draft',
+        details: 'Billing report created',
+        performedBy: createdBy,
+        performedAt: now  // Use Timestamp.now() instead of serverTimestamp()
+      };
   
       const billingReport: Omit<BillingReport, 'id'> = {
         appointmentId,
@@ -85,37 +113,20 @@ import {
         pendingAmount: total,
         
         // Services and Payments
-        services: services.map((service, index) => ({
-          id: `service_${index + 1}`,
-          description: service.description,
-          quantity: service.quantity,
-          unitPrice: service.unitPrice,
-          total: service.quantity * service.unitPrice,
-          procedureCode: service.procedureCode,
-          tooth: service.tooth,
-          category: service.category as any,
-          providedBy: appointment.doctorId
-        })),
+        services: billingServices,
         payments: [],
         
         // PDF
         pdfGenerated: false,
         
-        // System fields
+        // System fields - Use serverTimestamp() only at document root level
         createdAt: serverTimestamp() as any,
         updatedAt: serverTimestamp() as any,
         createdBy,
         lastModifiedBy: createdBy,
         
-        // Status history
-        statusHistory: [{
-          id: `history_${Date.now()}`,
-          previousStatus: 'draft' as any,
-          newStatus: 'draft',
-          details: 'Billing report created',
-          performedBy: createdBy,
-          performedAt: serverTimestamp() as any
-        }]
+        // Status history - Use regular Timestamp in arrays
+        statusHistory: [statusHistoryEntry]
       };
   
       const docRef = await addDoc(collection(db, BILLING_REPORTS_COLLECTION), billingReport);
@@ -151,7 +162,7 @@ import {
       const total = Math.round((subtotal + tax - discount) * 100) / 100;
       const pendingAmount = total - currentReport.paidAmount;
   
-      // Create status history entry
+      // Create status history entry with regular Timestamp
       const historyEntry: BillingStatusHistory = {
         id: `history_${Date.now()}`,
         previousStatus: currentReport.status,
@@ -159,7 +170,7 @@ import {
         details: `Services updated. New total: $${total.toFixed(2)}`,
         amount: total,
         performedBy: updatedBy,
-        performedAt: serverTimestamp() as any
+        performedAt: Timestamp.now()  // Use Timestamp.now() instead of serverTimestamp()
       };
   
       await updateDoc(reportRef, {
@@ -178,7 +189,6 @@ import {
       throw error;
     }
   };
-  
   /**
    * Add payment to billing report
    */
@@ -196,16 +206,17 @@ import {
       }
   
       const report = reportSnap.data() as BillingReport;
+      const now = Timestamp.now();
   
-      // Create new payment
+      // Create new payment with regular Timestamp
       const newPayment: BillingPayment = {
         ...paymentData,
         id: `payment_${Date.now()}`,
-        date: serverTimestamp() as any,
+        date: now,  // Use Timestamp.now()
         processedBy,
         verified: true,
         verifiedBy: processedBy,
-        verifiedAt: serverTimestamp() as any
+        verifiedAt: now  // Use Timestamp.now()
       };
   
       // Update amounts
@@ -220,7 +231,7 @@ import {
         newStatus = 'partially_paid';
       }
   
-      // Create status history entry
+      // Create status history entry with regular Timestamp
       const historyEntry: BillingStatusHistory = {
         id: `history_${Date.now()}`,
         previousStatus: report.status,
@@ -228,7 +239,7 @@ import {
         details: `Payment of $${paymentData.amount.toFixed(2)} via ${paymentData.method}`,
         amount: paymentData.amount,
         performedBy: processedBy,
-        performedAt: serverTimestamp() as any
+        performedAt: now
       };
   
       await updateDoc(reportRef, {
@@ -269,26 +280,26 @@ import {
       }
   
       const invoiceNumber = generateInvoiceNumber();
-      const invoiceDate = serverTimestamp() as any;
+      const now = Timestamp.now();
       const dueDate = Timestamp.fromDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)); // 30 days from now
   
       // Determine initial status based on payments
       const newStatus: BillingReport['status'] = report.paidAmount >= report.total ? 'paid' : 'completed';
   
-      // Create status history entry
+      // Create status history entry with regular Timestamp
       const historyEntry: BillingStatusHistory = {
         id: `history_${Date.now()}`,
         previousStatus: report.status,
         newStatus,
         details: `Report completed. Invoice number: ${invoiceNumber}`,
         performedBy: completedBy,
-        performedAt: serverTimestamp() as any
+        performedAt: now
       };
   
       await updateDoc(reportRef, {
         status: newStatus,
         invoiceNumber,
-        invoiceDate,
+        invoiceDate: now,
         dueDate,
         notes: notes || report.notes,
         statusHistory: [...report.statusHistory, historyEntry],

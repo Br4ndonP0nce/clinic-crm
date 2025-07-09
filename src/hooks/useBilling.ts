@@ -1,4 +1,5 @@
 // src/hooks/useBilling.ts
+'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { 
   BillingReport, 
