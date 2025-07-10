@@ -156,11 +156,42 @@ import { db } from './config';
   
       const currentReport = reportSnap.data() as BillingReport;
   
+      // Validate and clean services data
+      const cleanServices = services.map((service, index) => {
+        const cleanService: any = {
+          id: service.id || `service_${Date.now()}_${index}`,
+          description: service.description || '',
+          quantity: Math.max(0, service.quantity || 0),
+          unitPrice: Math.max(0, service.unitPrice || 0),
+          total: Math.max(0, service.total || 0),
+          category: service.category || 'consultation',
+          providedBy: service.providedBy || updatedBy
+        };
+  
+        // Only add optional fields if they have actual values
+        if (service.procedureCode && service.procedureCode.trim()) {
+          cleanService.procedureCode = service.procedureCode.trim();
+        }
+        
+        if (service.tooth && Array.isArray(service.tooth) && service.tooth.length > 0) {
+          const cleanTooth = service.tooth.filter(t => t && t.trim()).map(t => t.trim());
+          if (cleanTooth.length > 0) {
+            cleanService.tooth = cleanTooth;
+          }
+        }
+  
+        return cleanService;
+      }).filter(service => 
+        // Only include services with valid data
+        service.description.trim() !== '' && service.quantity > 0
+      );
+  
       // Calculate new totals
-      const subtotal = services.reduce((sum, service) => sum + service.total, 0);
+      const subtotal = cleanServices.reduce((sum, service) => sum + (service.total || 0), 0);
       const tax = Math.round(subtotal * MEXICAN_TAX_RATE * 100) / 100;
-      const total = Math.round((subtotal + tax - discount) * 100) / 100;
-      const pendingAmount = total - currentReport.paidAmount;
+      const cleanDiscount = Math.max(0, discount || 0);
+      const total = Math.round((subtotal + tax - cleanDiscount) * 100) / 100;
+      const pendingAmount = Math.max(0, total - (currentReport.paidAmount || 0));
   
       // Create status history entry with regular Timestamp
       const historyEntry: BillingStatusHistory = {
@@ -170,20 +201,25 @@ import { db } from './config';
         details: `Services updated. New total: $${total.toFixed(2)}`,
         amount: total,
         performedBy: updatedBy,
-        performedAt: Timestamp.now()  // Use Timestamp.now() instead of serverTimestamp()
+        performedAt: Timestamp.now()
       };
   
-      await updateDoc(reportRef, {
-        services,
-        subtotal,
-        tax,
-        discount,
-        total,
-        pendingAmount,
-        statusHistory: [...currentReport.statusHistory, historyEntry],
+      // Prepare clean update data (remove any undefined values)
+      const updateData = {
+        services: cleanServices,
+        subtotal: subtotal,
+        tax: tax,
+        discount: cleanDiscount,
+        total: total,
+        pendingAmount: pendingAmount,
+        statusHistory: [...(currentReport.statusHistory || []), historyEntry],
         lastModifiedBy: updatedBy,
         updatedAt: serverTimestamp()
-      });
+      };
+  
+      console.log('Updating billing services with clean data:', updateData);
+      
+      await updateDoc(reportRef, updateData);
     } catch (error) {
       console.error('Error updating billing services:', error);
       throw error;
@@ -296,16 +332,21 @@ import { db } from './config';
         performedAt: now
       };
   
-      await updateDoc(reportRef, {
+      // Prepare clean update data
+      const updateData = {
         status: newStatus,
         invoiceNumber,
         invoiceDate: now,
         dueDate,
-        notes: notes || report.notes,
-        statusHistory: [...report.statusHistory, historyEntry],
+        notes: notes || report.notes || '', // Always provide a string
+        statusHistory: [...(report.statusHistory || []), historyEntry],
         lastModifiedBy: completedBy,
         updatedAt: serverTimestamp()
-      });
+      };
+  
+      console.log('Completing billing report with clean data:', updateData);
+  
+      await updateDoc(reportRef, updateData);
     } catch (error) {
       console.error('Error completing billing report:', error);
       throw error;
@@ -805,12 +846,17 @@ import { db } from './config';
     try {
       const reportRef = doc(db, BILLING_REPORTS_COLLECTION, reportId);
       
-      await updateDoc(reportRef, {
-        notes,
-        internalNotes,
+      // Clean the data - ensure we never pass undefined
+      const updateData = {
+        notes: notes || '',  // Always provide a string, even if empty
+        internalNotes: internalNotes || '', // Always provide a string, even if empty
         lastModifiedBy: updatedBy,
         updatedAt: serverTimestamp()
-      });
+      };
+  
+      console.log('Updating billing notes with clean data:', updateData);
+      
+      await updateDoc(reportRef, updateData);
     } catch (error) {
       console.error('Error updating billing notes:', error);
       throw error;
