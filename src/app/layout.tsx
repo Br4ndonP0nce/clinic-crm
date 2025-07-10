@@ -13,9 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Demo Landing + CRM",
-  description:
-    "Demo de una landing page con un CRM integrado para capturar leads y gestionar clientes potenciales. Cloud+",
+  title: "Fleurs Dental Care",
+  description: "Clinica Odontologica Integral",
 };
 
 export default function RootLayout({
