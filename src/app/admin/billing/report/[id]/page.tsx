@@ -277,7 +277,7 @@ export default function BillingReportDetailPage() {
   };
 
   const handleBack = () => {
-    router.push("/admin/billing/reports");
+    router.push("/admin/billing/");
   };
 
   const handleGeneratePDF = () => {
@@ -376,14 +376,19 @@ export default function BillingReportDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {canManageBilling && report.status === "draft" && (
-            <Button variant="outline" onClick={handleEdit}>
+          {canManageBilling && (
+            <Button
+              variant="outline"
+              onClick={handleEdit} // This should now work!
+            >
               <Edit className="h-4 w-4 mr-2" />
               Editar
             </Button>
           )}
 
-          {(report.status === "completed" || report.status === "paid") && (
+          {(report.status === "completed" ||
+            report.status === "paid" ||
+            report.status === "partially_paid") && (
             <>
               <Button variant="outline" onClick={handleGeneratePDF}>
                 <Download className="h-4 w-4 mr-2" />

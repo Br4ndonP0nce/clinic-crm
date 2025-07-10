@@ -1,4 +1,4 @@
-// src/hooks/usePermissions.ts
+// src/hooks/usePermissions.ts - ENHANCED VERSION
 import { useAuth } from './useAuth';
 import { Permission } from '@/lib/firebase/rbac';
 import { useMemo } from 'react';
@@ -31,10 +31,16 @@ export const usePermissions = () => {
     canViewCalendar: hasPermission('calendar:read'),
     canManageCalendar: hasPermission('calendar:write'),
     
-    // Billing permissions
-    canViewBilling: hasPermission('billing:read'),
-    canManageBilling: hasPermission('billing:write'),
-    canProcessPayments: hasPermission('billing:write'),
+    // 🆕 ENHANCED BILLING PERMISSIONS
+    canViewBilling: hasPermission('billing:read') || userProfile?.role === 'doctor',
+    canManageBilling: hasPermission('billing:write') || userProfile?.role === 'doctor',
+    canProcessPayments: hasPermission('billing:write') || userProfile?.role === 'doctor',
+    
+    // Enhanced billing access for doctors
+    canCreateBillingReports: hasPermission('billing:write') || userProfile?.role === 'doctor',
+    canEditOwnBillingReports: userProfile?.role === 'doctor' || hasPermission('billing:write'),
+    canViewAllBillingReports: hasPermission('billing:read') && userProfile?.role !== 'doctor',
+    canDeleteBillingReports: hasPermission('billing:write') && userProfile?.role !== 'doctor',
     
     // Sales and ventas permissions
     canViewSales: hasPermission('ventas:read'),
@@ -50,11 +56,20 @@ export const usePermissions = () => {
     canManageStaff: hasPermission('staff:write'),
     canDeleteStaff: hasPermission('staff:delete'),
 
+    // 🆕 ENHANCED APPOINTMENT PERMISSIONS FOR DOCTORS
+    canEditOwnAppointments: userProfile?.role === 'doctor' || hasPermission('appointments:write'),
+    canDeleteOwnAppointments: userProfile?.role === 'doctor' || hasPermission('appointments:delete'),
+    canManageOwnPatientData: userProfile?.role === 'doctor' || hasPermission('patients:write'),
+
     // Compound permissions for complex operations
     canManagePatients: hasAnyPermission(['patients:read', 'patients:write']),
     canManageAppointments: hasAnyPermission(['appointments:read', 'appointments:write']),
     canManageTreatments: hasAnyPermission(['treatments:read', 'treatments:write']),
-    canManageFinances: hasAnyPermission(['billing:read', 'billing:write', 'ventas:read']),
+    
+    // 🆕 ENHANCED FINANCIAL PERMISSIONS
+    canManageFinances: hasAnyPermission(['billing:read', 'billing:write', 'ventas:read']) || userProfile?.role === 'doctor',
+    canViewFinancialReports: hasPermission('billing:read') || userProfile?.role === 'doctor',
+    canCreateFinancialDocuments: hasPermission('billing:write') || userProfile?.role === 'doctor',
     
     // Role-based compound permissions
     isDoctor: userProfile?.role === 'doctor',
@@ -73,7 +88,7 @@ export const usePermissions = () => {
       'patients:write', 
       'treatments:write', 
       'appointments:write'
-    ]),
+    ]) || userProfile?.role === 'doctor',
     
     // Administrative access levels
     canAccessAdminPanel: hasAnyPermission([
@@ -89,11 +104,11 @@ export const usePermissions = () => {
     canAccessBusinessData: hasAnyPermission([
       'billing:read', 
       'ventas:read'
-    ]),
+    ]) || userProfile?.role === 'doctor',
     canManageBusinessOperations: hasAnyPermission([
       'billing:write', 
       'ventas:write'
-    ]),
+    ]) || userProfile?.role === 'doctor',
 
     // Front desk operations
     canManageFrontDesk: hasAnyPermission([
@@ -102,10 +117,50 @@ export const usePermissions = () => {
       'calendar:read'
     ]),
     
+    // 🆕 CONTEXTUAL PERMISSIONS - Based on resource ownership
+    canEditAppointment: (appointmentDoctorId?: string) => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion') return true;
+      if (userProfile?.role === 'doctor' && appointmentDoctorId === userProfile.uid) return true;
+      return hasPermission('appointments:write');
+    },
+    
+    canDeleteAppointment: (appointmentDoctorId?: string, appointmentStatus?: string) => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion' && appointmentStatus !== 'completed') return true;
+      if (userProfile?.role === 'doctor' && 
+          appointmentDoctorId === userProfile.uid && 
+          appointmentStatus !== 'completed' && 
+          appointmentStatus !== 'cancelled') return true;
+      return hasPermission('appointments:delete');
+    },
+    
+    canViewBillingReport: (reportDoctorId?: string) => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion') return true;
+      if (userProfile?.role === 'doctor' && reportDoctorId === userProfile.uid) return true;
+      return hasPermission('billing:read');
+    },
+    
+    canEditBillingReport: (reportDoctorId?: string) => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion') return true;
+      if (userProfile?.role === 'doctor' && reportDoctorId === userProfile.uid) return true;
+      return hasPermission('billing:write');
+    },
+    
+    canCreateBillingReportForAppointment: (appointmentDoctorId?: string) => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion') return true;
+      if (userProfile?.role === 'doctor' && appointmentDoctorId === userProfile.uid) return true;
+      return hasPermission('billing:write');
+    },
+    
     // Role and status checks
     role: userProfile?.role,
     isActive: userProfile?.isActive || false,
     displayName: userProfile?.displayName || userProfile?.email || 'Usuario',
+    userId: userProfile?.uid,
     
     // Helper functions for dynamic permission checking
     can: hasPermission,
@@ -119,7 +174,7 @@ export const usePermissions = () => {
         case 'super_admin':
           return '/admin/dashboard';
         case 'doctor':
-          return '/admin/patients';
+          return '/admin/calendar'; // Changed from patients to calendar for doctors
         case 'ventas':
           return '/admin/ventas';
         case 'recepcion':
@@ -140,27 +195,50 @@ export const usePermissions = () => {
       return 'basic';
     },
     
-    // Quick permission groups for UI components (only using existing permissions)
+    // 🆕 FEATURE FLAGS FOR UI COMPONENTS
+    shouldShowBillingTab: () => {
+      return hasPermission('billing:read') || userProfile?.role === 'doctor';
+    },
+    
+    shouldShowEditButtons: (resourceOwnerId?: string) => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion') return true;
+      if (userProfile?.role === 'doctor' && resourceOwnerId === userProfile.uid) return true;
+      return false;
+    },
+    
+    shouldShowDeleteButtons: (resourceOwnerId?: string, resourceStatus?: string) => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion' && resourceStatus !== 'completed') return true;
+      if (userProfile?.role === 'doctor' && 
+          resourceOwnerId === userProfile.uid && 
+          resourceStatus !== 'completed') return true;
+      return false;
+    },
+    
+    // Quick permission groups for UI components
     patientPermissions: {
       read: hasPermission('patients:read'),
-      write: hasPermission('patients:write'),
+      write: hasPermission('patients:write') || userProfile?.role === 'doctor',
       delete: hasPermission('patients:delete'),
     },
     
     appointmentPermissions: {
       read: hasPermission('appointments:read'),
-      write: hasPermission('appointments:write'),
+      write: hasPermission('appointments:write') || userProfile?.role === 'doctor',
       delete: hasPermission('appointments:delete'),
     },
     
     treatmentPermissions: {
       read: hasPermission('treatments:read'),
-      write: hasPermission('treatments:write'),
+      write: hasPermission('treatments:write') || userProfile?.role === 'doctor',
     },
     
     billingPermissions: {
-      read: hasPermission('billing:read'),
-      write: hasPermission('billing:write'),
+      read: hasPermission('billing:read') || userProfile?.role === 'doctor',
+      write: hasPermission('billing:write') || userProfile?.role === 'doctor',
+      create: hasPermission('billing:write') || userProfile?.role === 'doctor',
+      delete: hasPermission('billing:write') && userProfile?.role !== 'doctor',
     },
     
     salesPermissions: {
@@ -181,7 +259,45 @@ export const usePermissions = () => {
     
     calendarPermissions: {
       read: hasPermission('calendar:read'),
-      write: hasPermission('calendar:write'),
+      write: hasPermission('calendar:write') || userProfile?.role === 'doctor',
+    },
+
+    // 🆕 DATA FILTERING HELPERS
+    shouldFilterDataByUser: () => {
+      // Regular doctors should only see their own data
+      // Super admins should see all data
+      return userProfile?.role === 'doctor';
+    },
+    
+    getDataFilterUserId: () => {
+      // Only return user ID for filtering if it's a regular doctor
+      if (userProfile?.role === 'doctor') {
+        return userProfile.uid;
+      }
+      return null;
+    },
+    
+    // 🆕 BILLING SPECIFIC HELPERS
+    canProcessPaymentsFor: (reportDoctorId?: string) => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion') return true;
+      if (userProfile?.role === 'doctor' && reportDoctorId === userProfile.uid) return true;
+      return hasPermission('billing:write');
+    },
+    
+    canGenerateInvoicesFor: (reportDoctorId?: string) => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion') return true;
+      if (userProfile?.role === 'doctor' && reportDoctorId === userProfile.uid) return true;
+      return hasPermission('billing:write');
+    },
+    
+    canViewFinancialSummaries: () => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion') return true;
+      // Doctors can see summaries for their own work
+      if (userProfile?.role === 'doctor') return true;
+      return hasPermission('billing:read');
     }
   }), [userProfile, hasPermission, hasAnyPermission]);
 

@@ -252,6 +252,18 @@ export const bulkDeleteAppointments = async (appointmentIds: string[]): Promise<
 /**
  * Update a patient's status or data
  */
+export const getUser = async (userId: string) => {
+  try {
+    const userDoc = await getDoc(doc(db, 'app_users', userId));
+    if (userDoc.exists()) {
+      return { id: userDoc.id, ...userDoc.data() };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    throw error;
+  }
+};
 export const updatePatient = async (patientId: string, data: Partial<Patient>, performedBy?: string): Promise<void> => {
   try {
     const patientRef = doc(db, PATIENTS_COLLECTION, patientId);

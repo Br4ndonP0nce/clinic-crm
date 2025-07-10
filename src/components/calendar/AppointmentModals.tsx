@@ -1,4 +1,4 @@
-// src/components/calendar/AppointmentModals.tsx - ENHANCED VERSION
+// src/components/calendar/AppointmentModals.tsx - ENHANCED VERSION WITH FIXED PERMISSIONS
 "use client";
 import { motion } from "framer-motion";
 import React, { useState, useEffect } from "react";
@@ -67,7 +67,7 @@ import {
 } from "lucide-react";
 
 // ============================================================================
-// ENHANCED APPOINTMENT DETAILS MODAL WITH BILLING INTEGRATION
+// ENHANCED APPOINTMENT DETAILS MODAL WITH FIXED PERMISSIONS
 // ============================================================================
 
 interface AppointmentDetailsModalProps {
@@ -80,8 +80,16 @@ interface AppointmentDetailsModalProps {
 export const AppointmentDetailsModal: React.FC<
   AppointmentDetailsModalProps
 > = ({ event, open, onClose, onUpdate }) => {
-  const { userProfile, hasPermission } = useAuth();
-  const { canViewBilling, canManageBilling } = usePermissions();
+  const { userProfile } = useAuth();
+  const {
+    canViewBilling,
+    canManageBilling,
+    isDoctor,
+    isSuperAdmin,
+    canEditAppointments,
+    canDeleteAppointments,
+  } = usePermissions();
+
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -98,21 +106,101 @@ export const AppointmentDetailsModal: React.FC<
 
   const { createReport } = useBillingReports();
 
-  // Check if user can delete appointments
-  const canDelete =
-    hasPermission("appointments:delete") &&
-    (userProfile?.role === "doctor" ||
-      userProfile?.role === "super_admin" ||
-      userProfile?.role === "recepcion");
+  // 🔧 ENHANCED PERMISSION LOGIC
+  const canDelete = React.useMemo(() => {
+    if (!event?.resource.appointment) return false;
+
+    const appointment = event.resource.appointment;
+
+    // Super admin can delete any appointment
+    if (isSuperAdmin) return true;
+
+    // Doctors can delete their own appointments (unless completed/cancelled)
+    if (isDoctor && appointment.doctorId === userProfile?.uid) {
+      return (
+        appointment.status !== "completed" && appointment.status !== "cancelled"
+      );
+    }
+
+    // Reception can delete any appointment (unless completed)
+    if (userProfile?.role === "recepcion") {
+      return appointment.status !== "completed";
+    }
+
+    // Fallback to general permission
+    return canDeleteAppointments;
+  }, [event, userProfile, isSuperAdmin, isDoctor, canDeleteAppointments]);
+
+  const canEdit = React.useMemo(() => {
+    if (!event?.resource.appointment) return false;
+
+    const appointment = event.resource.appointment;
+
+    // Super admin can edit any appointment
+    if (isSuperAdmin) return true;
+
+    // Doctors can edit their own appointments
+    if (isDoctor && appointment.doctorId === userProfile?.uid) {
+      return true;
+    }
+
+    // Reception can edit most appointments
+    if (userProfile?.role === "recepcion") {
+      return true;
+    }
+
+    return canEditAppointments;
+  }, [event, userProfile, isSuperAdmin, isDoctor, canEditAppointments]);
+
+  const canCreateBillingReport = React.useMemo(() => {
+    if (!event?.resource.appointment) return false;
+
+    const appointment = event.resource.appointment;
+
+    // Super admin can create any billing report
+    if (isSuperAdmin) return true;
+
+    // Doctors can create billing reports for their own appointments
+    if (isDoctor && appointment.doctorId === userProfile?.uid) {
+      return true;
+    }
+
+    // Reception can create billing reports
+    if (userProfile?.role === "recepcion") {
+      return true;
+    }
+
+    return canManageBilling;
+  }, [event, userProfile, isSuperAdmin, isDoctor, canManageBilling]);
+
+  const canViewBillingData = React.useMemo(() => {
+    if (!event?.resource.appointment) return false;
+
+    const appointment = event.resource.appointment;
+
+    // Super admin can view any billing data
+    if (isSuperAdmin) return true;
+
+    // Doctors can view billing for their own appointments
+    if (isDoctor && appointment.doctorId === userProfile?.uid) {
+      return true;
+    }
+
+    // Reception can view billing data
+    if (userProfile?.role === "recepcion") {
+      return true;
+    }
+
+    return canViewBilling;
+  }, [event, userProfile, isSuperAdmin, isDoctor, canViewBilling]);
 
   useEffect(() => {
-    if (event?.resource.appointment) {
-      // Load billing report if user has permissions
-      if (canViewBilling && event.resource.appointment.id) {
+    if (event?.resource.appointment && canViewBillingData) {
+      if (event.resource.appointment.id) {
         loadReportByAppointment(event.resource.appointment.id);
       }
     }
-  }, [event, canViewBilling]);
+  }, [event, canViewBillingData]);
 
   if (!event) return null;
 
@@ -176,19 +264,28 @@ export const AppointmentDetailsModal: React.FC<
   };
 
   const handleCreateBillingReport = async () => {
-    if (!appointment?.id || !canManageBilling) return;
+    if (!appointment?.id || !canCreateBillingReport) return;
 
     try {
+      setLoading(true);
       const reportId = await createReport(appointment.id);
-      window.open(`/admin/billing/reports/${reportId}`, "_blank");
+      window.open(`/admin/billing/report/${reportId}`, "_blank");
     } catch (error) {
       console.error("Error creating billing report:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleViewBillingReport = () => {
     if (report?.id) {
-      window.open(`/admin/billing/reports/${report.id}`, "_blank");
+      window.open(`/admin/billing/report/${report.id}`, "_blank");
+    }
+  };
+
+  const handleEditBillingReport = () => {
+    if (report?.id) {
+      window.open(`/admin/billing/report/${report.id}/edit`, "_blank");
     }
   };
 
@@ -196,6 +293,7 @@ export const AppointmentDetailsModal: React.FC<
     if (!report?.id) return;
 
     try {
+      setLoading(true);
       const response = await fetch(`/api/billing/pdf/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -215,6 +313,8 @@ export const AppointmentDetailsModal: React.FC<
       }
     } catch (error) {
       console.error("Error generating PDF:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -280,8 +380,9 @@ export const AppointmentDetailsModal: React.FC<
 
   const statusStyle = getAppointmentStatusStyle(appointment.status);
   const billingStatus = getBillingStatus();
-  const canCreateReport = canManageBilling && !report;
-  const canAddPayment = canManageBilling && report && report.pendingAmount > 0;
+  const canCreateReport = canCreateBillingReport && !report;
+  const canAddPayment =
+    canCreateBillingReport && report && report.pendingAmount > 0;
   const canGeneratePDF =
     report &&
     (report.status === "completed" ||
@@ -299,7 +400,7 @@ export const AppointmentDetailsModal: React.FC<
                 Detalles de la Cita
               </span>
               <div className="flex space-x-2">
-                {hasPermission("appointments:write") && (
+                {canEdit && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -317,7 +418,9 @@ export const AppointmentDetailsModal: React.FC<
                     className="text-red-600 hover:text-red-700 hover:bg-red-50"
                   >
                     <Trash2 className="h-4 w-4 mr-1" />
-                    Cancelar
+                    {appointment.status === "completed"
+                      ? "Eliminar"
+                      : "Cancelar"}
                   </Button>
                 )}
               </div>
@@ -341,7 +444,7 @@ export const AppointmentDetailsModal: React.FC<
                   initial={false}
                   animate={{
                     x: activeTab === "details" ? "0%" : "100%",
-                    width: canViewBilling ? "50%" : "100%",
+                    width: canViewBillingData ? "50%" : "100%",
                   }}
                   transition={{
                     type: "spring",
@@ -358,7 +461,7 @@ export const AppointmentDetailsModal: React.FC<
                   Detalles de la Cita
                 </TabsTrigger>
 
-                {canViewBilling && (
+                {canViewBillingData && (
                   <TabsTrigger
                     value="billing"
                     className="flex items-center relative z-10 data-[state=active]:bg-transparent data-[state=active]:text-blue-600"
@@ -377,7 +480,6 @@ export const AppointmentDetailsModal: React.FC<
 
             {/* APPOINTMENT DETAILS TAB */}
             <TabsContent value="details" className="space-y-6 mt-6">
-              {/* Appointment Status */}
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -490,44 +592,8 @@ export const AppointmentDetailsModal: React.FC<
                   </div>
                 )}
 
-                {/* Room and Equipment (if available) */}
-                {(appointment.room || appointment.equipment) && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {appointment.room && (
-                      <div>
-                        <Label className="text-sm font-medium text-gray-600">
-                          Sala
-                        </Label>
-                        <p className="mt-1 flex items-center">
-                          <MapPin className="mr-2 h-4 w-4 text-gray-500" />
-                          {appointment.room}
-                        </p>
-                      </div>
-                    )}
-                    {appointment.equipment &&
-                      appointment.equipment.length > 0 && (
-                        <div>
-                          <Label className="text-sm font-medium text-gray-600">
-                            Equipo
-                          </Label>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {appointment.equipment.map((item, index) => (
-                              <Badge
-                                key={index}
-                                variant="outline"
-                                className="text-xs"
-                              >
-                                {item}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                  </div>
-                )}
-
                 {/* Quick Actions */}
-                {hasPermission("appointments:write") &&
+                {canEdit &&
                   appointment.status !== "completed" &&
                   appointment.status !== "cancelled" && (
                     <div className="border-t pt-4">
@@ -576,7 +642,7 @@ export const AppointmentDetailsModal: React.FC<
             </TabsContent>
 
             {/* BILLING TAB */}
-            {canViewBilling && (
+            {canViewBillingData && (
               <TabsContent value="billing" className="space-y-6 mt-6">
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
@@ -704,9 +770,19 @@ export const AppointmentDetailsModal: React.FC<
                           <Button
                             onClick={handleCreateBillingReport}
                             className="w-full"
+                            disabled={loading}
                           >
-                            <Plus className="h-4 w-4 mr-2" />
-                            Crear Reporte de Facturación
+                            {loading ? (
+                              <div className="flex items-center">
+                                <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
+                                Creando...
+                              </div>
+                            ) : (
+                              <>
+                                <Plus className="h-4 w-4 mr-2" />
+                                Crear Reporte de Facturación
+                              </>
+                            )}
                           </Button>
                         )}
 
@@ -720,6 +796,17 @@ export const AppointmentDetailsModal: React.FC<
                               <FileText className="h-4 w-4 mr-2" />
                               Ver Reporte Completo
                             </Button>
+
+                            {canCreateBillingReport && (
+                              <Button
+                                onClick={handleEditBillingReport}
+                                variant="outline"
+                                className="w-full"
+                              >
+                                <Edit3 className="h-4 w-4 mr-2" />
+                                Editar Reporte
+                              </Button>
+                            )}
 
                             {canAddPayment && (
                               <Button
@@ -737,9 +824,19 @@ export const AppointmentDetailsModal: React.FC<
                                 onClick={handleGeneratePDF}
                                 variant="outline"
                                 className="w-full"
+                                disabled={loading}
                               >
-                                <Download className="h-4 w-4 mr-2" />
-                                Generar PDF
+                                {loading ? (
+                                  <div className="flex items-center">
+                                    <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-gray-500 mr-2"></div>
+                                    Generando...
+                                  </div>
+                                ) : (
+                                  <>
+                                    <Download className="h-4 w-4 mr-2" />
+                                    Generar PDF
+                                  </>
+                                )}
                               </Button>
                             )}
                           </div>
@@ -756,7 +853,7 @@ export const AppointmentDetailsModal: React.FC<
             <Button variant="outline" onClick={onClose}>
               Cerrar
             </Button>
-            {hasPermission("appointments:write") && (
+            {canEdit && (
               <Button
                 onClick={() => {
                   window.location.href = `/admin/patients/${patient.id}`;
@@ -792,11 +889,18 @@ export const AppointmentDetailsModal: React.FC<
           <DialogHeader>
             <DialogTitle className="flex items-center text-red-600">
               <AlertTriangle className="mr-2 h-5 w-5" />
-              Confirmar Eliminación
+              Confirmar{" "}
+              {appointment.status === "completed"
+                ? "Eliminación"
+                : "Cancelación"}
             </DialogTitle>
             <DialogDescription>
-              ¿Estás seguro de que quieres eliminar esta cita? Esta acción no se
-              puede deshacer y la cita será eliminada permanentemente.
+              ¿Estás seguro de que quieres{" "}
+              {appointment.status === "completed" ? "eliminar" : "cancelar"}{" "}
+              esta cita?
+              {appointment.status === "completed"
+                ? " Esta acción no se puede deshacer y la cita será eliminada permanentemente."
+                : " La cita será marcada como cancelada."}
             </DialogDescription>
           </DialogHeader>
 
@@ -835,12 +939,18 @@ export const AppointmentDetailsModal: React.FC<
               {isDeleting ? (
                 <div className="flex items-center">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Eliminando...
+                  {appointment.status === "completed"
+                    ? "Eliminando..."
+                    : "Cancelando..."}
                 </div>
               ) : (
                 <>
                   <Trash2 className="mr-2 h-4 w-4" />
-                  Sí, Eliminar Cita
+                  Sí,{" "}
+                  {appointment.status === "completed"
+                    ? "Eliminar"
+                    : "Cancelar"}{" "}
+                  Cita
                 </>
               )}
             </Button>
@@ -851,7 +961,7 @@ export const AppointmentDetailsModal: React.FC<
   );
 };
 
-// Quick Payment Modal (unchanged)
+// Quick Payment Modal
 function QuickPaymentModal({
   isOpen,
   onClose,
@@ -892,7 +1002,7 @@ function QuickPaymentModal({
           <Button
             onClick={() => {
               if (reportId) {
-                window.open(`/admin/billing/reports/${reportId}`, "_blank");
+                window.open(`/admin/billing/report/${reportId}`, "_blank");
               }
               onClose();
             }}
@@ -904,6 +1014,3 @@ function QuickPaymentModal({
     </Dialog>
   );
 }
-
-// KEEP THE EXISTING NewAppointmentModal UNCHANGED
-// ... (rest of your existing NewAppointmentModal code)
