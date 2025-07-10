@@ -541,18 +541,6 @@ export default function BillingDashboard() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              console.log(
-                "TEST BUTTON CLICKED - If you see this, clicks work!"
-              );
-              alert("Test button works!");
-            }}
-          >
-            Test Click
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
             onClick={refreshDashboard}
             disabled={dashboardLoading}
           >
