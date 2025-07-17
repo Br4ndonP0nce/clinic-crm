@@ -1,10 +1,7 @@
-// ============================================================================
-// CALENDAR VIEWS COMPONENT
-// ============================================================================
-
-import React from "react";
+// Optimized CalendarViews.tsx
+import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Calendar1, Clock } from "lucide-react";
+import { Plus, Calendar1, Clock, Stethoscope } from "lucide-react";
 import { Appointment, Patient } from "@/lib/firebase/db";
 import { CalendarView } from "../CalendarPage";
 
@@ -19,7 +16,7 @@ interface CalendarViewsProps {
   canCreateAppointments: boolean;
 }
 
-const appointmentTypes = [
+const APPOINTMENT_TYPES = [
   { value: "consultation", label: "Consulta", color: "bg-blue-500" },
   { value: "cleaning", label: "Limpieza", color: "bg-green-500" },
   { value: "procedure", label: "Procedimiento", color: "bg-purple-500" },
@@ -27,116 +24,184 @@ const appointmentTypes = [
   { value: "emergency", label: "Emergencia", color: "bg-red-500" },
 ];
 
-export const CalendarViews: React.FC<CalendarViewsProps> = ({
-  view,
-  currentDate,
-  appointments,
-  patients,
-  selectedDoctor,
-  onTimeSlotClick,
-  onAppointmentClick,
-  canCreateAppointments,
+const TIME_SLOTS = Array.from({ length: 20 }, (_, i) => {
+  const hour = Math.floor(8 + i / 2);
+  const minute = (i % 2) * 30;
+  return `${hour.toString().padStart(2, "0")}:${minute
+    .toString()
+    .padStart(2, "0")}`;
+});
+
+// Utility functions
+const getWeekDays = (currentDate: Date) => {
+  const start = new Date(currentDate);
+  const day = start.getDay();
+  const diff = start.getDate() - day + (day === 0 ? -6 : 1);
+  start.setDate(diff);
+
+  return Array.from({ length: 7 }, (_, i) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + i);
+    return date;
+  });
+};
+
+const getMonthDays = (currentDate: Date) => {
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startDate = new Date(firstDay);
+  const startDay = firstDay.getDay();
+  const daysFromMonday = startDay === 0 ? 6 : startDay - 1;
+  startDate.setDate(firstDay.getDate() - daysFromMonday);
+
+  return Array.from({ length: 42 }, (_, i) => {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + i);
+    return date;
+  });
+};
+
+const getAppointmentForSlot = (
+  appointments: Appointment[],
+  date: Date,
+  time: string
+) => {
+  const slotDateTime = new Date(`${date.toISOString().split("T")[0]}T${time}`);
+  return appointments.find((apt) => {
+    const aptDate = apt.appointmentDate.toDate();
+    return aptDate.getTime() === slotDateTime.getTime();
+  });
+};
+
+const getAppointmentsForDay = (appointments: Appointment[], date: Date) => {
+  return appointments.filter((apt) => {
+    const aptDate = apt.appointmentDate.toDate();
+    return aptDate.toDateString() === date.toDateString();
+  });
+};
+
+// Appointment component
+const AppointmentCard: React.FC<{
+  appointment: Appointment;
+  patient?: Patient;
+  compact?: boolean;
+  showTooltip?: boolean;
+  onClick: (e?: React.MouseEvent) => void;
+}> = ({
+  appointment,
+  patient,
+  compact = false,
+  showTooltip = false,
+  onClick,
 }) => {
-  const selectedDoctorInfo = { displayName: "Doctor" }; // You can pass this as prop
+  const appointmentType = APPOINTMENT_TYPES.find(
+    (t) => t.value === appointment.type
+  );
 
   return (
-    <>
-      {view === "month" && (
-        <MonthView
-          currentDate={currentDate}
-          appointments={appointments}
-          patients={patients}
-          selectedDoctorInfo={selectedDoctorInfo}
-          onTimeSlotClick={onTimeSlotClick}
-          onAppointmentClick={onAppointmentClick}
-          canCreateAppointments={canCreateAppointments}
-        />
+    <div
+      className={`p-1 rounded text-white text-xs cursor-pointer transition-opacity hover:opacity-90 ${
+        appointmentType?.color || "bg-gray-500"
+      } ${appointment.status === "cancelled" ? "opacity-50" : ""} ${
+        showTooltip ? "relative group" : ""
+      }`}
+      onClick={(e) => onClick(e)}
+    >
+      {compact ? (
+        <div className="truncate font-medium">
+          {appointment.appointmentDate.toDate().toLocaleTimeString("es-MX", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </div>
+      ) : (
+        <>
+          <div className="font-medium truncate">
+            {patient?.fullName || "Paciente"}
+          </div>
+          <div className="truncate">{appointmentType?.label}</div>
+          {!compact && (
+            <div className="text-xs opacity-75">{appointment.duration}min</div>
+          )}
+        </>
       )}
 
-      {view === "week" && (
-        <WeekView
-          currentDate={currentDate}
-          appointments={appointments}
-          patients={patients}
-          selectedDoctorInfo={selectedDoctorInfo}
-          onTimeSlotClick={onTimeSlotClick}
-          onAppointmentClick={onAppointmentClick}
-          canCreateAppointments={canCreateAppointments}
-        />
+      {showTooltip && (
+        <div className="absolute bottom-full left-0 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap">
+          {appointment.reasonForVisit}
+        </div>
       )}
-
-      {view === "day" && (
-        <DayView
-          currentDate={currentDate}
-          appointments={appointments}
-          patients={patients}
-          selectedDoctorInfo={selectedDoctorInfo}
-          onTimeSlotClick={onTimeSlotClick}
-          onAppointmentClick={onAppointmentClick}
-          canCreateAppointments={canCreateAppointments}
-        />
-      )}
-    </>
+    </div>
   );
 };
 
-// ============================================================================
-// MONTH VIEW COMPONENT
-// ============================================================================
-
-interface MonthViewProps {
-  currentDate: Date;
-  appointments: Appointment[];
-  patients: Patient[];
-  selectedDoctorInfo: any;
+// Time slot component
+const TimeSlot: React.FC<{
+  date: Date;
+  time: string;
+  appointment?: Appointment;
+  patient?: Patient;
+  canCreate: boolean;
+  isWeekend?: boolean;
   onTimeSlotClick: (date: Date, time: string) => void;
   onAppointmentClick: (appointment: Appointment) => void;
-  canCreateAppointments: boolean;
-}
+}> = ({
+  date,
+  time,
+  appointment,
+  patient,
+  canCreate,
+  isWeekend,
+  onTimeSlotClick,
+  onAppointmentClick,
+}) => {
+  if (appointment) {
+    return (
+      <AppointmentCard
+        appointment={appointment}
+        patient={patient}
+        showTooltip
+        onClick={() => onAppointmentClick(appointment)}
+      />
+    );
+  }
 
-const MonthView: React.FC<MonthViewProps> = ({
+  if (isWeekend) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-gray-400">
+        <span className="text-xs">Fin de semana</span>
+      </div>
+    );
+  }
+
+  return canCreate ? (
+    <div
+      className="w-full h-full flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer hover:bg-blue-50"
+      onClick={() => onTimeSlotClick(date, time)}
+    >
+      <Plus className="h-4 w-4 text-gray-400" />
+    </div>
+  ) : null;
+};
+
+// Month View
+const MonthView: React.FC<CalendarViewsProps> = ({
   currentDate,
   appointments,
   patients,
-  selectedDoctorInfo,
   onTimeSlotClick,
   onAppointmentClick,
   canCreateAppointments,
 }) => {
-  const getMonthDays = () => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-
-    const firstDay = new Date(year, month, 1);
-    const startDate = new Date(firstDay);
-    const startDay = firstDay.getDay();
-    const daysFromMonday = startDay === 0 ? 6 : startDay - 1;
-    startDate.setDate(firstDay.getDate() - daysFromMonday);
-
-    const days = [];
-    for (let i = 0; i < 42; i++) {
-      const date = new Date(startDate);
-      date.setDate(startDate.getDate() + i);
-      days.push(date);
-    }
-    return days;
-  };
-
-  const getAppointmentsForDay = (date: Date) => {
-    return appointments.filter((apt) => {
-      const aptDate = apt.appointmentDate.toDate();
-      return aptDate.toDateString() === date.toDateString();
-    });
-  };
-
-  const monthDays = getMonthDays();
+  const monthDays = useMemo(() => getMonthDays(currentDate), [currentDate]);
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center">
-          <Calendar1 className="mr-2 h-5 w-5" />
-          Calendario Mensual - {selectedDoctorInfo?.displayName}
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center">
+          <Calendar1 className="mr-2 h-4 w-4" />
+          Vista Mensual
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
@@ -144,7 +209,7 @@ const MonthView: React.FC<MonthViewProps> = ({
           {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((day) => (
             <div
               key={day}
-              className="p-3 border-r bg-gray-50 text-center font-medium"
+              className="p-2 border-r bg-gray-50 text-center text-sm font-medium"
             >
               {day}
             </div>
@@ -154,13 +219,13 @@ const MonthView: React.FC<MonthViewProps> = ({
           {monthDays.map((date, index) => {
             const isCurrentMonth = date.getMonth() === currentDate.getMonth();
             const isToday = date.toDateString() === new Date().toDateString();
-            const dayAppointments = getAppointmentsForDay(date);
+            const dayAppointments = getAppointmentsForDay(appointments, date);
             const isWeekend = date.getDay() === 0 || date.getDay() === 6;
 
             return (
               <div
                 key={index}
-                className={`min-h-[120px] p-2 border-r border-b ${
+                className={`min-h-[100px] p-1 border-r border-b ${
                   !isCurrentMonth
                     ? "bg-gray-50 text-gray-400"
                     : isToday
@@ -187,44 +252,26 @@ const MonthView: React.FC<MonthViewProps> = ({
                   {date.getDate()}
                 </div>
                 <div className="space-y-1">
-                  {dayAppointments.slice(0, 3).map((appointment) => {
-                    const appointmentType = appointmentTypes.find(
-                      (t) => t.value === appointment.type
-                    );
+                  {dayAppointments.slice(0, 2).map((appointment) => {
                     const patient = patients.find(
                       (p) => p.id === appointment.patientId
                     );
-
                     return (
-                      <div
+                      <AppointmentCard
                         key={appointment.id}
-                        className={`text-xs p-1 rounded text-white cursor-pointer ${
-                          appointmentType?.color || "bg-gray-500"
-                        } ${
-                          appointment.status === "cancelled" ? "opacity-50" : ""
-                        }`}
+                        appointment={appointment}
+                        patient={patient}
+                        compact
                         onClick={(e) => {
-                          e.stopPropagation();
+                          e?.stopPropagation();
                           onAppointmentClick(appointment);
                         }}
-                      >
-                        <div className="truncate font-medium">
-                          {appointment.appointmentDate
-                            .toDate()
-                            .toLocaleTimeString("es-MX", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                        </div>
-                        <div className="truncate">
-                          {patient?.fullName || "Paciente"}
-                        </div>
-                      </div>
+                      />
                     );
                   })}
-                  {dayAppointments.length > 3 && (
+                  {dayAppointments.length > 2 && (
                     <div className="text-xs text-gray-500 text-center">
-                      +{dayAppointments.length - 3} más
+                      +{dayAppointments.length - 2}
                     </div>
                   )}
                 </div>
@@ -237,98 +284,45 @@ const MonthView: React.FC<MonthViewProps> = ({
   );
 };
 
-// ============================================================================
-// WEEK VIEW COMPONENT
-// ============================================================================
-
-interface WeekViewProps {
-  currentDate: Date;
-  appointments: Appointment[];
-  patients: Patient[];
-  selectedDoctorInfo: any;
-  onTimeSlotClick: (date: Date, time: string) => void;
-  onAppointmentClick: (appointment: Appointment) => void;
-  canCreateAppointments: boolean;
-}
-
-const WeekView: React.FC<WeekViewProps> = ({
+// Week View
+const WeekView: React.FC<CalendarViewsProps> = ({
   currentDate,
   appointments,
   patients,
-  selectedDoctorInfo,
   onTimeSlotClick,
   onAppointmentClick,
   canCreateAppointments,
 }) => {
-  const generateTimeSlots = () => {
-    const slots = [];
-    for (let hour = 8; hour < 18; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) {
-        const timeString = `${hour.toString().padStart(2, "0")}:${minute
-          .toString()
-          .padStart(2, "0")}`;
-        slots.push(timeString);
-      }
-    }
-    return slots;
-  };
-
-  const getWeekDays = () => {
-    const start = new Date(currentDate);
-    const day = start.getDay();
-    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-    start.setDate(diff);
-
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(start);
-      date.setDate(start.getDate() + i);
-      days.push(date);
-    }
-    return days;
-  };
-
-  const getAppointmentForSlot = (date: Date, time: string) => {
-    const slotDateTime = new Date(
-      `${date.toISOString().split("T")[0]}T${time}`
-    );
-    return appointments.find((apt) => {
-      const aptDate = apt.appointmentDate.toDate();
-      return aptDate.getTime() === slotDateTime.getTime();
-    });
-  };
-
-  const timeSlots = generateTimeSlots();
-  const weekDays = getWeekDays();
+  const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center">
-          <Calendar1 className="mr-2 h-5 w-5" />
-          Calendario Semanal - {selectedDoctorInfo?.displayName}
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center">
+          <Calendar1 className="mr-2 h-4 w-4" />
+          Vista Semanal
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
-          <div className="min-w-[800px]">
-            {/* Week Header */}
+          <div className="min-w-[600px]">
+            {/* Header */}
             <div className="grid grid-cols-8 border-b">
-              <div className="p-3 border-r bg-gray-50">
-                <span className="text-sm font-medium">Hora</span>
+              <div className="p-2 border-r bg-gray-50 text-sm font-medium">
+                Hora
               </div>
               {weekDays.map((day, index) => {
                 const isToday =
                   day.toDateString() === new Date().toDateString();
-                const dayAppointments = appointments.filter((apt) => {
-                  const aptDate = apt.appointmentDate.toDate();
-                  return aptDate.toDateString() === day.toDateString();
-                });
+                const dayAppointments = getAppointmentsForDay(
+                  appointments,
+                  day
+                );
 
                 return (
                   <div
                     key={index}
-                    className={`p-3 border-r text-center ${
+                    className={`p-2 border-r text-center ${
                       isToday ? "bg-blue-50" : "bg-gray-50"
                     }`}
                   >
@@ -343,9 +337,8 @@ const WeekView: React.FC<WeekViewProps> = ({
                       {day.getDate()}
                     </div>
                     {dayAppointments.length > 0 && (
-                      <div className="text-xs text-gray-600 mt-1">
-                        {dayAppointments.length} cita
-                        {dayAppointments.length !== 1 ? "s" : ""}
+                      <div className="text-xs text-gray-600">
+                        {dayAppointments.length}
                       </div>
                     )}
                   </div>
@@ -353,82 +346,44 @@ const WeekView: React.FC<WeekViewProps> = ({
               })}
             </div>
 
-            {/* Time Slots */}
-            <div className="max-h-[600px] overflow-y-auto">
-              {timeSlots.map((time) => (
+            {/* Time slots */}
+            <div className="max-h-[500px] overflow-y-auto">
+              {TIME_SLOTS.map((time) => (
                 <div
                   key={time}
                   className="grid grid-cols-8 border-b hover:bg-gray-50"
                 >
-                  <div className="p-2 border-r bg-gray-50 text-center">
-                    <span className="text-sm font-medium">{time}</span>
+                  <div className="p-2 border-r bg-gray-50 text-center text-sm font-medium">
+                    {time}
                   </div>
                   {weekDays.map((day, dayIndex) => {
-                    const appointment = getAppointmentForSlot(day, time);
-                    const appointmentType = appointmentTypes.find(
-                      (t) => t.value === appointment?.type
+                    const appointment = getAppointmentForSlot(
+                      appointments,
+                      day,
+                      time
                     );
-                    const patientInfo = appointment
+                    const patient = appointment
                       ? patients.find((p) => p.id === appointment.patientId)
-                      : null;
+                      : undefined;
                     const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 
                     return (
                       <div
                         key={dayIndex}
-                        className={`p-1 border-r min-h-[60px] ${
-                          isWeekend
-                            ? "bg-gray-100"
-                            : appointment
-                            ? "cursor-pointer"
-                            : canCreateAppointments
-                            ? "cursor-pointer hover:bg-blue-50"
-                            : ""
+                        className={`p-1 border-r min-h-[50px] ${
+                          isWeekend ? "bg-gray-100" : ""
                         }`}
-                        onClick={() => {
-                          if (appointment) {
-                            onAppointmentClick(appointment);
-                          } else if (!isWeekend && canCreateAppointments) {
-                            onTimeSlotClick(day, time);
-                          }
-                        }}
                       >
-                        {appointment ? (
-                          <div
-                            className={`p-2 rounded text-white text-xs ${
-                              appointmentType?.color || "bg-gray-500"
-                            } ${
-                              appointment.status === "cancelled"
-                                ? "opacity-50"
-                                : ""
-                            } relative group`}
-                          >
-                            <div className="font-medium truncate">
-                              {patientInfo?.fullName || "Paciente Desconocido"}
-                            </div>
-                            <div className="truncate">
-                              {appointmentType?.label}
-                            </div>
-                            <div className="text-xs opacity-75">
-                              {appointment.duration}min
-                            </div>
-
-                            {/* Tooltip */}
-                            <div className="absolute bottom-full left-0 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap">
-                              {appointment.reasonForVisit}
-                            </div>
-                          </div>
-                        ) : isWeekend ? (
-                          <div className="w-full h-full flex items-center justify-center text-gray-400">
-                            <span className="text-xs">Fin de semana</span>
-                          </div>
-                        ) : (
-                          canCreateAppointments && (
-                            <div className="w-full h-full flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                              <Plus className="h-4 w-4 text-gray-400" />
-                            </div>
-                          )
-                        )}
+                        <TimeSlot
+                          date={day}
+                          time={time}
+                          appointment={appointment}
+                          patient={patient}
+                          canCreate={canCreateAppointments}
+                          isWeekend={isWeekend}
+                          onTimeSlotClick={onTimeSlotClick}
+                          onAppointmentClick={onAppointmentClick}
+                        />
                       </div>
                     );
                   })}
@@ -442,126 +397,54 @@ const WeekView: React.FC<WeekViewProps> = ({
   );
 };
 
-// ============================================================================
-// DAY VIEW COMPONENT
-// ============================================================================
-
-interface DayViewProps {
-  currentDate: Date;
-  appointments: Appointment[];
-  patients: Patient[];
-  selectedDoctorInfo: any;
-  onTimeSlotClick: (date: Date, time: string) => void;
-  onAppointmentClick: (appointment: Appointment) => void;
-  canCreateAppointments: boolean;
-}
-
-const DayView: React.FC<DayViewProps> = ({
+// Day View
+const DayView: React.FC<CalendarViewsProps> = ({
   currentDate,
   appointments,
   patients,
-  selectedDoctorInfo,
   onTimeSlotClick,
   onAppointmentClick,
   canCreateAppointments,
 }) => {
-  const generateTimeSlots = () => {
-    const slots = [];
-    for (let hour = 8; hour < 18; hour++) {
-      for (let minute = 0; minute < 60; minute += 30) {
-        const timeString = `${hour.toString().padStart(2, "0")}:${minute
-          .toString()
-          .padStart(2, "0")}`;
-        slots.push(timeString);
-      }
-    }
-    return slots;
-  };
-
-  const getAppointmentForSlot = (date: Date, time: string) => {
-    const slotDateTime = new Date(
-      `${date.toISOString().split("T")[0]}T${time}`
-    );
-    return appointments.find((apt) => {
-      const aptDate = apt.appointmentDate.toDate();
-      return aptDate.getTime() === slotDateTime.getTime();
-    });
-  };
-
-  const timeSlots = generateTimeSlots();
-
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center">
-          <Calendar1 className="mr-2 h-5 w-5" />
-          Vista Diaria -{" "}
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center">
+          <Calendar1 className="mr-2 h-4 w-4" />
           {currentDate.toLocaleDateString("es-MX", {
             weekday: "long",
             day: "numeric",
             month: "long",
-            year: "numeric",
           })}
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="max-h-[600px] overflow-y-auto">
-          {timeSlots.map((time) => {
-            const appointment = getAppointmentForSlot(currentDate, time);
-            const appointmentType = appointmentTypes.find(
-              (t) => t.value === appointment?.type
+        <div className="max-h-[500px] overflow-y-auto">
+          {TIME_SLOTS.map((time) => {
+            const appointment = getAppointmentForSlot(
+              appointments,
+              currentDate,
+              time
             );
-            const patientInfo = appointment
+            const patient = appointment
               ? patients.find((p) => p.id === appointment.patientId)
-              : null;
+              : undefined;
 
             return (
               <div key={time} className="flex border-b hover:bg-gray-50">
-                <div className="w-20 p-4 border-r bg-gray-50 text-center">
-                  <span className="text-sm font-medium">{time}</span>
+                <div className="w-16 p-3 border-r bg-gray-50 text-center text-sm font-medium">
+                  {time}
                 </div>
-                <div
-                  className={`flex-1 p-2 min-h-[80px] ${
-                    appointment
-                      ? "cursor-pointer"
-                      : canCreateAppointments
-                      ? "cursor-pointer hover:bg-blue-50"
-                      : ""
-                  }`}
-                  onClick={() => {
-                    if (appointment) {
-                      onAppointmentClick(appointment);
-                    } else if (canCreateAppointments) {
-                      onTimeSlotClick(currentDate, time);
-                    }
-                  }}
-                >
-                  {appointment ? (
-                    <div
-                      className={`p-3 rounded text-white ${
-                        appointmentType?.color || "bg-gray-500"
-                      } ${
-                        appointment.status === "cancelled" ? "opacity-50" : ""
-                      }`}
-                    >
-                      <div className="font-medium">
-                        {patientInfo?.fullName || "Paciente Desconocido"}
-                      </div>
-                      <div className="text-sm opacity-90">
-                        {appointmentType?.label}
-                      </div>
-                      <div className="text-sm opacity-75">
-                        {appointment.duration} min -{" "}
-                        {appointment.reasonForVisit}
-                      </div>
-                    </div>
-                  ) : (
-                    canCreateAppointments && (
-                      <div className="w-full h-full flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                        <Plus className="h-6 w-6 text-gray-400" />
-                      </div>
-                    )
-                  )}
+                <div className="flex-1 p-2 min-h-[60px]">
+                  <TimeSlot
+                    date={currentDate}
+                    time={time}
+                    appointment={appointment}
+                    patient={patient}
+                    canCreate={canCreateAppointments}
+                    onTimeSlotClick={onTimeSlotClick}
+                    onAppointmentClick={onAppointmentClick}
+                  />
                 </div>
               </div>
             );
@@ -572,12 +455,20 @@ const DayView: React.FC<DayViewProps> = ({
   );
 };
 
-// ============================================================================
-// CALENDAR STATS COMPONENT
-// ============================================================================
+// Main Views Component
+export const CalendarViews: React.FC<CalendarViewsProps> = (props) => {
+  const { view } = props;
 
-import { Stethoscope } from "lucide-react";
+  return (
+    <>
+      {view === "month" && <MonthView {...props} />}
+      {view === "week" && <WeekView {...props} />}
+      {view === "day" && <DayView {...props} />}
+    </>
+  );
+};
 
+// Calendar Stats Component
 interface CalendarStatsProps {
   appointments: Appointment[];
   currentDate: Date;
@@ -587,626 +478,80 @@ export const CalendarStats: React.FC<CalendarStatsProps> = ({
   appointments,
   currentDate,
 }) => {
-  const getWeekDays = () => {
-    const start = new Date(currentDate);
-    const day = start.getDay();
-    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-    start.setDate(diff);
+  const stats = useMemo(() => {
+    const today = new Date();
+    const weekDays = getWeekDays(currentDate);
 
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(start);
-      date.setDate(start.getDate() + i);
-      days.push(date);
-    }
-    return days;
-  };
+    return {
+      today: appointments.filter(
+        (apt) =>
+          apt.appointmentDate.toDate().toDateString() === today.toDateString()
+      ).length,
+      week: appointments.filter((apt) => {
+        const aptDate = apt.appointmentDate.toDate();
+        return weekDays.some(
+          (day) => day.toDateString() === aptDate.toDateString()
+        );
+      }).length,
+      scheduled: appointments.filter((apt) => apt.status === "scheduled")
+        .length,
+      completed: appointments.filter((apt) => apt.status === "completed")
+        .length,
+    };
+  }, [appointments, currentDate]);
 
-  const weekDays = getWeekDays();
-
-  // Calculate statistics
-  const todayAppointments = appointments.filter(
-    (apt) =>
-      apt.appointmentDate.toDate().toDateString() === new Date().toDateString()
-  ).length;
-
-  const weekAppointments = appointments.filter((apt) => {
-    const aptDate = apt.appointmentDate.toDate();
-    return weekDays.some(
-      (day) => day.toDateString() === aptDate.toDateString()
-    );
-  }).length;
-
-  const scheduledAppointments = appointments.filter(
-    (apt) => apt.status === "scheduled"
-  ).length;
-
-  const completedAppointments = appointments.filter(
-    (apt) => apt.status === "completed"
-  ).length;
-
-  const stats = [
+  const statCards = [
     {
-      title: "Citas Hoy",
-      value: todayAppointments,
+      title: "Hoy",
+      value: stats.today,
       icon: Calendar1,
-      color: "text-blue-500",
-      bgColor: "bg-blue-50",
+      color: "text-blue-600",
+      bg: "bg-blue-50",
     },
     {
-      title: "Esta Semana",
-      value: weekAppointments,
+      title: "Semana",
+      value: stats.week,
       icon: Clock,
-      color: "text-green-500",
-      bgColor: "bg-green-50",
+      color: "text-green-600",
+      bg: "bg-green-50",
     },
     {
       title: "Programadas",
-      value: scheduledAppointments,
+      value: stats.scheduled,
       icon: Clock,
-      color: "text-blue-600",
-      bgColor: "bg-blue-50",
+      color: "text-amber-600",
+      bg: "bg-amber-50",
     },
     {
       title: "Completadas",
-      value: completedAppointments,
+      value: stats.completed,
       icon: Stethoscope,
-      color: "text-green-600",
-      bgColor: "bg-green-50",
+      color: "text-purple-600",
+      bg: "bg-purple-50",
     },
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      {stats.map((stat, index) => (
-        <Card key={index} className="transition-shadow hover:shadow-md">
-          <CardContent className="p-4">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {statCards.map((stat, index) => (
+        <Card key={index} className="hover:shadow-md transition-shadow">
+          <CardContent className="p-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600 font-medium">
+                <p className="text-xs text-gray-600 font-medium">
                   {stat.title}
                 </p>
-                <p className={`text-2xl font-bold ${stat.color}`}>
+                <p className={`text-xl font-bold ${stat.color}`}>
                   {stat.value}
                 </p>
               </div>
-              <div className={`p-3 rounded-full ${stat.bgColor}`}>
-                <stat.icon className={`h-6 w-6 ${stat.color}`} />
+              <div className={`p-2 rounded-full ${stat.bg}`}>
+                <stat.icon className={`h-4 w-4 ${stat.color}`} />
               </div>
             </div>
           </CardContent>
         </Card>
       ))}
     </div>
-  );
-};
-
-// ============================================================================
-// ENHANCED CALENDAR STATS WITH MORE METRICS
-// ============================================================================
-
-interface EnhancedCalendarStatsProps {
-  appointments: Appointment[];
-  currentDate: Date;
-}
-
-export const EnhancedCalendarStats: React.FC<EnhancedCalendarStatsProps> = ({
-  appointments,
-  currentDate,
-}) => {
-  const getWeekDays = () => {
-    const start = new Date(currentDate);
-    const day = start.getDay();
-    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-    start.setDate(diff);
-
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(start);
-      date.setDate(start.getDate() + i);
-      days.push(date);
-    }
-    return days;
-  };
-
-  const weekDays = getWeekDays();
-
-  // Enhanced statistics
-  const todayAppointments = appointments.filter(
-    (apt) =>
-      apt.appointmentDate.toDate().toDateString() === new Date().toDateString()
-  );
-
-  const weekAppointments = appointments.filter((apt) => {
-    const aptDate = apt.appointmentDate.toDate();
-    return weekDays.some(
-      (day) => day.toDateString() === aptDate.toDateString()
-    );
-  });
-
-  const appointmentsByStatus = {
-    scheduled: appointments.filter((apt) => apt.status === "scheduled").length,
-    confirmed: appointments.filter((apt) => apt.status === "confirmed").length,
-    completed: appointments.filter((apt) => apt.status === "completed").length,
-    cancelled: appointments.filter((apt) => apt.status === "cancelled").length,
-    no_show: appointments.filter((apt) => apt.status === "no_show").length,
-  };
-
-  const appointmentsByType = appointmentTypes.reduce((acc, type) => {
-    acc[type.value] = appointments.filter(
-      (apt) => apt.type === type.value
-    ).length;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const totalDuration = todayAppointments.reduce(
-    (sum, apt) => sum + apt.duration,
-    0
-  );
-
-  const averageDuration =
-    todayAppointments.length > 0
-      ? Math.round(totalDuration / todayAppointments.length)
-      : 0;
-
-  const primaryStats = [
-    {
-      title: "Citas Hoy",
-      value: todayAppointments.length,
-      subtitle: `${totalDuration} min total`,
-      icon: Calendar1,
-      color: "text-blue-600",
-      bgColor: "bg-blue-50",
-    },
-    {
-      title: "Esta Semana",
-      value: weekAppointments.length,
-      subtitle: `Promedio: ${averageDuration} min`,
-      icon: Clock,
-      color: "text-green-600",
-      bgColor: "bg-green-50",
-    },
-    {
-      title: "Confirmadas",
-      value: appointmentsByStatus.confirmed,
-      subtitle: `${appointmentsByStatus.scheduled} pendientes`,
-      icon: Clock,
-      color: "text-amber-600",
-      bgColor: "bg-amber-50",
-    },
-    {
-      title: "Completadas",
-      value: appointmentsByStatus.completed,
-      subtitle: `${appointmentsByStatus.cancelled} canceladas`,
-      icon: Stethoscope,
-      color: "text-green-600",
-      bgColor: "bg-green-50",
-    },
-  ];
-
-  return (
-    <div className="space-y-6">
-      {/* Primary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {primaryStats.map((stat, index) => (
-          <Card
-            key={index}
-            className="transition-all hover:shadow-lg hover:scale-105"
-          >
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <p className="text-sm text-gray-600 font-medium">
-                    {stat.title}
-                  </p>
-                  <p className={`text-2xl font-bold ${stat.color}`}>
-                    {stat.value}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">{stat.subtitle}</p>
-                </div>
-                <div className={`p-3 rounded-full ${stat.bgColor}`}>
-                  <stat.icon className={`h-6 w-6 ${stat.color}`} />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Secondary Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Appointment Types */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Tipos de Cita</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {appointmentTypes.map((type) => {
-                const count = appointmentsByType[type.value] || 0;
-                const percentage =
-                  appointments.length > 0
-                    ? Math.round((count / appointments.length) * 100)
-                    : 0;
-
-                return (
-                  <div
-                    key={type.value}
-                    className="flex items-center justify-between"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <div className={`w-3 h-3 rounded ${type.color}`}></div>
-                      <span className="text-sm font-medium">{type.label}</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm text-gray-600">
-                        {percentage}%
-                      </span>
-                      <span className="text-sm font-semibold">{count}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Status Overview */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Estado de Citas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {Object.entries(appointmentsByStatus).map(([status, count]) => {
-                const statusLabels = {
-                  scheduled: "Programadas",
-                  confirmed: "Confirmadas",
-                  completed: "Completadas",
-                  cancelled: "Canceladas",
-                  no_show: "No Asistió",
-                };
-
-                const statusColors = {
-                  scheduled: "text-blue-600",
-                  confirmed: "text-green-600",
-                  completed: "text-gray-600",
-                  cancelled: "text-red-600",
-                  no_show: "text-orange-600",
-                };
-
-                const percentage =
-                  appointments.length > 0
-                    ? Math.round((count / appointments.length) * 100)
-                    : 0;
-
-                return (
-                  <div
-                    key={status}
-                    className="flex items-center justify-between"
-                  >
-                    <span className="text-sm font-medium">
-                      {statusLabels[status as keyof typeof statusLabels]}
-                    </span>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm text-gray-600">
-                        {percentage}%
-                      </span>
-                      <span
-                        className={`text-sm font-semibold ${
-                          statusColors[status as keyof typeof statusColors]
-                        }`}
-                      >
-                        {count}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-};
-
-// ============================================================================
-// APPOINTMENT SUMMARY CARD (Additional Component)
-// ============================================================================
-
-interface AppointmentSummaryProps {
-  appointments: Appointment[];
-  patients: Patient[];
-  selectedDate?: Date;
-}
-
-export const AppointmentSummary: React.FC<AppointmentSummaryProps> = ({
-  appointments,
-  patients,
-  selectedDate = new Date(),
-}) => {
-  const dayAppointments = appointments.filter((apt) => {
-    const aptDate = apt.appointmentDate.toDate();
-    return aptDate.toDateString() === selectedDate.toDateString();
-  });
-
-  const sortedAppointments = dayAppointments.sort(
-    (a, b) =>
-      a.appointmentDate.toDate().getTime() -
-      b.appointmentDate.toDate().getTime()
-  );
-
-  const getStatusBadgeColor = (status: string) => {
-    switch (status) {
-      case "scheduled":
-        return "bg-blue-100 text-blue-800";
-      case "confirmed":
-        return "bg-green-100 text-green-800";
-      case "completed":
-        return "bg-gray-100 text-gray-800";
-      case "cancelled":
-        return "bg-red-100 text-red-800";
-      case "no_show":
-        return "bg-orange-100 text-orange-800";
-      default:
-        return "bg-gray-100 text-gray-800";
-    }
-  };
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "scheduled":
-        return "Programada";
-      case "confirmed":
-        return "Confirmada";
-      case "completed":
-        return "Completada";
-      case "cancelled":
-        return "Cancelada";
-      case "no_show":
-        return "No Asistió";
-      default:
-        return "Desconocido";
-    }
-  };
-
-  if (dayAppointments.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">
-            Citas del{" "}
-            {selectedDate.toLocaleDateString("es-MX", {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-            })}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-8 text-gray-500">
-            <Calendar1 className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-            <p>No hay citas programadas para este día</p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg flex items-center justify-between">
-          <span>
-            Citas del{" "}
-            {selectedDate.toLocaleDateString("es-MX", {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-            })}
-          </span>
-          <span className="text-sm font-normal text-gray-600">
-            {dayAppointments.length} cita
-            {dayAppointments.length !== 1 ? "s" : ""}
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {sortedAppointments.map((appointment) => {
-            const patient = patients.find(
-              (p) => p.id === appointment.patientId
-            );
-            const appointmentType = appointmentTypes.find(
-              (t) => t.value === appointment.type
-            );
-
-            return (
-              <div
-                key={appointment.id}
-                className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center space-x-3">
-                  <div
-                    className={`w-4 h-4 rounded ${
-                      appointmentType?.color || "bg-gray-500"
-                    }`}
-                  ></div>
-                  <div>
-                    <p className="font-medium text-sm">
-                      {patient?.fullName || "Paciente Desconocido"}
-                    </p>
-                    <p className="text-xs text-gray-600">
-                      {appointmentType?.label} • {appointment.duration} min
-                    </p>
-                    <p className="text-xs text-gray-500 truncate max-w-[200px]">
-                      {appointment.reasonForVisit}
-                    </p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-medium">
-                    {appointment.appointmentDate
-                      .toDate()
-                      .toLocaleTimeString("es-MX", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                  </p>
-                  <span
-                    className={`inline-block px-2 py-1 text-xs rounded-full ${getStatusBadgeColor(
-                      appointment.status
-                    )}`}
-                  >
-                    {getStatusLabel(appointment.status)}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
-// ============================================================================
-// WEEKLY PERFORMANCE CHART (Additional Component)
-// ============================================================================
-
-interface WeeklyPerformanceProps {
-  appointments: Appointment[];
-  currentDate: Date;
-}
-
-export const WeeklyPerformance: React.FC<WeeklyPerformanceProps> = ({
-  appointments,
-  currentDate,
-}) => {
-  const getWeekDays = () => {
-    const start = new Date(currentDate);
-    const day = start.getDay();
-    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-    start.setDate(diff);
-
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(start);
-      date.setDate(start.getDate() + i);
-      days.push(date);
-    }
-    return days;
-  };
-
-  const weekDays = getWeekDays();
-
-  const weeklyData = weekDays.map((day) => {
-    const dayAppointments = appointments.filter((apt) => {
-      const aptDate = apt.appointmentDate.toDate();
-      return aptDate.toDateString() === day.toDateString();
-    });
-
-    const completed = dayAppointments.filter(
-      (apt) => apt.status === "completed"
-    ).length;
-    const scheduled = dayAppointments.filter(
-      (apt) => apt.status === "scheduled"
-    ).length;
-    const cancelled = dayAppointments.filter(
-      (apt) => apt.status === "cancelled"
-    ).length;
-
-    return {
-      day: day.toLocaleDateString("es-MX", { weekday: "short" }),
-      date: day.getDate(),
-      total: dayAppointments.length,
-      completed,
-      scheduled,
-      cancelled,
-      isToday: day.toDateString() === new Date().toDateString(),
-    };
-  });
-
-  const maxAppointments = Math.max(...weeklyData.map((d) => d.total), 1);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Rendimiento Semanal</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-7 gap-2">
-          {weeklyData.map((data, index) => (
-            <div key={index} className="text-center">
-              <div className="text-xs font-medium text-gray-600 mb-1">
-                {data.day}
-              </div>
-              <div
-                className={`text-sm font-bold mb-2 ${
-                  data.isToday ? "text-blue-600" : "text-gray-900"
-                }`}
-              >
-                {data.date}
-              </div>
-
-              {/* Visual bar chart */}
-              <div className="h-20 flex flex-col justify-end space-y-1">
-                {data.completed > 0 && (
-                  <div
-                    className="bg-green-500 rounded-sm"
-                    style={{
-                      height: `${(data.completed / maxAppointments) * 60}px`,
-                      minHeight: data.completed > 0 ? "4px" : "0px",
-                    }}
-                    title={`${data.completed} completadas`}
-                  ></div>
-                )}
-                {data.scheduled > 0 && (
-                  <div
-                    className="bg-blue-500 rounded-sm"
-                    style={{
-                      height: `${(data.scheduled / maxAppointments) * 60}px`,
-                      minHeight: data.scheduled > 0 ? "4px" : "0px",
-                    }}
-                    title={`${data.scheduled} programadas`}
-                  ></div>
-                )}
-                {data.cancelled > 0 && (
-                  <div
-                    className="bg-red-500 rounded-sm"
-                    style={{
-                      height: `${(data.cancelled / maxAppointments) * 60}px`,
-                      minHeight: data.cancelled > 0 ? "4px" : "0px",
-                    }}
-                    title={`${data.cancelled} canceladas`}
-                  ></div>
-                )}
-              </div>
-
-              <div className="text-xs font-semibold text-gray-700 mt-1">
-                {data.total}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Legend */}
-        <div className="flex justify-center space-x-4 mt-4 pt-4 border-t">
-          <div className="flex items-center space-x-1">
-            <div className="w-3 h-3 bg-green-500 rounded-sm"></div>
-            <span className="text-xs text-gray-600">Completadas</span>
-          </div>
-          <div className="flex items-center space-x-1">
-            <div className="w-3 h-3 bg-blue-500 rounded-sm"></div>
-            <span className="text-xs text-gray-600">Programadas</span>
-          </div>
-          <div className="flex items-center space-x-1">
-            <div className="w-3 h-3 bg-red-500 rounded-sm"></div>
-            <span className="text-xs text-gray-600">Canceladas</span>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
   );
 };
