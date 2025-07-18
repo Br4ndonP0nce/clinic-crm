@@ -1,4 +1,4 @@
-// src/components/ui/admin/PatientTable.tsx
+// src/components/ui/admin/PatientTable.tsx - Updated with Quick Appointment Action
 "use client";
 
 import React from "react";
@@ -37,16 +37,22 @@ import {
   UserCheck,
   UserX,
   Activity,
+  CalendarPlus,
 } from "lucide-react";
 
 interface PatientTableProps {
   patients: Patient[];
   onStatusChange: (patientId: string, newStatus: Patient["status"]) => void;
+  // NEW: Quick appointment functionality
+  onQuickAppointment?: (patient: Patient) => void;
+  showQuickActions?: boolean;
 }
 
 export default function PatientTable({
   patients,
   onStatusChange,
+  onQuickAppointment,
+  showQuickActions = false,
 }: PatientTableProps) {
   const { userProfile, hasPermission } = useAuth();
 
@@ -126,6 +132,15 @@ export default function PatientTable({
     }
   };
 
+  // NEW: Handle quick appointment creation
+  const handleQuickAppointmentClick = (
+    patient: Patient,
+    event: React.MouseEvent
+  ) => {
+    event.stopPropagation(); // Prevent row click if you have it
+    onQuickAppointment?.(patient);
+  };
+
   if (patients.length === 0) {
     return (
       <div className="text-center py-12">
@@ -152,7 +167,11 @@ export default function PatientTable({
             <TableHead>Última Visita</TableHead>
             <TableHead>Registrado</TableHead>
             <TableHead>Asignado a</TableHead>
-            <TableHead className="text-right">Acciones</TableHead>
+            {/* NEW: Quick Actions Column - Only show if enabled */}
+            {showQuickActions && (
+              <TableHead className="text-center">Acciones Rápidas</TableHead>
+            )}
+            <TableHead className="text-right">Más</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -241,6 +260,44 @@ export default function PatientTable({
                 )}
               </TableCell>
 
+              {/* NEW: Quick Actions Column */}
+              {showQuickActions && (
+                <TableCell className="text-center">
+                  <div className="flex items-center justify-center space-x-1">
+                    {/* Quick Appointment Button */}
+                    {onQuickAppointment &&
+                      hasPermission("appointments:write") && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) =>
+                            handleQuickAppointmentClick(patient, e)
+                          }
+                          className="flex items-center h-8 px-2"
+                          title="Crear nueva cita para este paciente"
+                        >
+                          <CalendarPlus className="h-3 w-3 mr-1" />
+                          <span className="hidden sm:inline text-xs">Cita</span>
+                        </Button>
+                      )}
+
+                    {/* Quick View Button */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      asChild
+                      className="h-8 px-2"
+                      title="Ver perfil del paciente"
+                    >
+                      <Link href={`/admin/patients/${patient.id}`}>
+                        <Eye className="h-3 w-3" />
+                        <span className="sr-only">Ver perfil</span>
+                      </Link>
+                    </Button>
+                  </div>
+                </TableCell>
+              )}
+
               <TableCell className="text-right">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -261,13 +318,16 @@ export default function PatientTable({
                       </Link>
                     </DropdownMenuItem>
 
-                    {/* Schedule Appointment */}
-                    {hasPermission("appointments:write") && (
-                      <DropdownMenuItem>
-                        <Calendar className="mr-2 h-4 w-4" />
-                        Programar Cita
-                      </DropdownMenuItem>
-                    )}
+                    {/* Schedule Appointment - NEW: With actual functionality */}
+                    {hasPermission("appointments:write") &&
+                      onQuickAppointment && (
+                        <DropdownMenuItem
+                          onClick={() => onQuickAppointment(patient)}
+                        >
+                          <CalendarPlus className="mr-2 h-4 w-4" />
+                          Programar Cita
+                        </DropdownMenuItem>
+                      )}
 
                     {/* Add Treatment */}
                     {hasPermission("treatments:write") && (

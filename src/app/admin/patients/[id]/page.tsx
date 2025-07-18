@@ -1,12 +1,12 @@
-// src/app/admin/patients/[id]/page.tsx - Refactored
+// src/app/admin/patients/[id]/page.tsx - Updated with Smart Calendar Modal
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { usePatientData } from "@/hooks/usePatientData";
 import { usePatientEditing } from "@/hooks/usePatientEditing";
-import { addAppointment } from "@/lib/firebase/db";
+import { addAppointment, getAppointments } from "@/lib/firebase/db";
 import { Timestamp } from "firebase/firestore";
 
 // Component imports
@@ -16,10 +16,8 @@ import { AllergiesCard } from "@/components/patient/AllergiesCard";
 import { MedicationsCard } from "@/components/patient/MedicationsCard";
 import { DentalHistoryCard } from "@/components/patient/DentalHistoryCard";
 import { DentalProblemsCard } from "@/components/patient/DentalProblemsCard";
-import {
-  NewAppointmentModal,
-  NewAppointmentData,
-} from "@/components/patient/NewAppointmentModal";
+// Import the NEW smart calendar modal
+import { NewAppointmentModal } from "@/components/calendar/NewAppointmentModal";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +38,9 @@ import {
   Pill,
 } from "lucide-react";
 
+// Import timezone utilities
+import { createLocalDateTime, formatDateForInput } from "@/lib/utils/datetime";
+
 export default function PatientDetailsPage() {
   const params = useParams();
   const router = useRouter();
@@ -48,6 +49,8 @@ export default function PatientDetailsPage() {
 
   // Modal states
   const [showNewAppointmentModal, setShowNewAppointmentModal] = useState(false);
+  const [allDoctorAppointments, setAllDoctorAppointments] = useState<any[]>([]);
+  const [selectedDoctor, setSelectedDoctor] = useState<string>("");
 
   // Main data hook
   const {
@@ -75,6 +78,46 @@ export default function PatientDetailsPage() {
     addToArray,
     removeFromArray,
   } = usePatientEditing();
+
+  // Load all appointments for the selected doctor (for smart scheduling)
+  useEffect(() => {
+    const loadDoctorAppointments = async () => {
+      if (!selectedDoctor) return;
+
+      try {
+        // Load appointments for the next 3 months for conflict detection
+        const today = new Date();
+        const futureDate = new Date();
+        futureDate.setMonth(today.getMonth() + 3);
+
+        const doctorAppointments = await getAppointments(
+          today,
+          futureDate,
+          selectedDoctor
+        );
+
+        setAllDoctorAppointments(doctorAppointments);
+      } catch (error) {
+        console.error("Error loading doctor appointments:", error);
+      }
+    };
+
+    loadDoctorAppointments();
+  }, [selectedDoctor]);
+
+  // Auto-select doctor when doctors are loaded
+  useEffect(() => {
+    if (doctors.length > 0 && !selectedDoctor) {
+      // If user is a doctor, select themselves
+      if (userProfile?.role === "doctor") {
+        setSelectedDoctor(userProfile.uid);
+      } else {
+        // Otherwise select the first available doctor
+        setSelectedDoctor(doctors[0].uid);
+      }
+    }
+  }, [doctors, userProfile, selectedDoctor]);
+
   const handleSave = async () => {
     if (!isValid) return;
 
@@ -86,33 +129,32 @@ export default function PatientDetailsPage() {
       // Error is already handled in the hook
     }
   };
-  // Handle new appointment creation
-  const handleCreateAppointment = async (
-    appointmentData: NewAppointmentData
-  ) => {
+
+  // Handle appointment creation using the smart modal
+  const handleAppointmentCreated = async () => {
     try {
-      const appointmentDateTime = new Date(
-        `${appointmentData.date}T${appointmentData.time}`
-      );
+      // Refresh patient data to show new appointment
+      await refreshData();
 
-      const newAppointment = {
-        patientId: patientId,
-        doctorId: appointmentData.doctorId,
-        appointmentDate: Timestamp.fromDate(appointmentDateTime),
-        duration: appointmentData.duration,
-        type: appointmentData.type,
-        status: "scheduled" as const,
-        reasonForVisit: appointmentData.reasonForVisit,
-        notes: appointmentData.notes,
-        reminders: [],
-        createdBy: userProfile?.uid || "unknown",
-      };
+      // Reload doctor appointments for future scheduling
+      if (selectedDoctor) {
+        const today = new Date();
+        const futureDate = new Date();
+        futureDate.setMonth(today.getMonth() + 3);
 
-      await addAppointment(newAppointment);
-      await refreshData(); // Refresh to show new appointment
+        const doctorAppointments = await getAppointments(
+          today,
+          futureDate,
+          selectedDoctor
+        );
+
+        setAllDoctorAppointments(doctorAppointments);
+      }
+
+      // Close modal
+      setShowNewAppointmentModal(false);
     } catch (error) {
-      console.error("Error creating appointment:", error);
-      throw error;
+      console.error("Error refreshing data:", error);
     }
   };
 
@@ -218,6 +260,61 @@ export default function PatientDetailsPage() {
     }
   };
 
+  const getAppointmentTypeLabel = (type: string) => {
+    switch (type) {
+      case "consultation":
+        return "Consulta";
+      case "cleaning":
+        return "Limpieza";
+      case "procedure":
+        return "Procedimiento";
+      case "followup":
+        return "Seguimiento";
+      case "emergency":
+        return "Emergencia";
+      default:
+        return type;
+    }
+  };
+
+  const getAppointmentStatusLabel = (status: string) => {
+    switch (status) {
+      case "scheduled":
+        return "Programada";
+      case "confirmed":
+        return "Confirmada";
+      case "in_progress":
+        return "En Progreso";
+      case "completed":
+        return "Completada";
+      case "cancelled":
+        return "Cancelada";
+      case "no_show":
+        return "No Asistió";
+      default:
+        return status;
+    }
+  };
+
+  const getAppointmentStatusColor = (status: string) => {
+    switch (status) {
+      case "scheduled":
+        return "bg-blue-100 text-blue-800";
+      case "confirmed":
+        return "bg-green-100 text-green-800";
+      case "in_progress":
+        return "bg-yellow-100 text-yellow-800";
+      case "completed":
+        return "bg-gray-100 text-gray-800";
+      case "cancelled":
+        return "bg-red-100 text-red-800";
+      case "no_show":
+        return "bg-orange-100 text-orange-800";
+      default:
+        return "bg-gray-100 text-gray-800";
+    }
+  };
+
   // Loading state
   if (isLoading && !patient) {
     return (
@@ -258,13 +355,16 @@ export default function PatientDetailsPage() {
 
         <div className="flex gap-2">
           {/* Quick Action Buttons */}
-          <Button
-            variant="outline"
-            onClick={() => setShowNewAppointmentModal(true)}
-          >
-            <CalendarPlus className="mr-2 h-4 w-4" />
-            Nueva Cita
-          </Button>
+          {hasPermission("appointments:write") && (
+            <Button
+              variant="outline"
+              onClick={() => setShowNewAppointmentModal(true)}
+              disabled={!selectedDoctor}
+            >
+              <CalendarPlus className="mr-2 h-4 w-4" />
+              Nueva Cita
+            </Button>
+          )}
           <Button variant="outline">
             <Activity className="mr-2 h-4 w-4" />
             Nuevo Tratamiento
@@ -348,7 +448,6 @@ export default function PatientDetailsPage() {
               onUpdateData={updateEditableData}
             />
 
-            {/* TODO: Add other cards */}
             {/* Insurance Card */}
             <Card>
               <CardHeader>
@@ -533,32 +632,96 @@ export default function PatientDetailsPage() {
         <TabsContent value="appointments" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center">
-                <Calendar className="mr-2 h-5 w-5" />
-                Historial de Citas ({appointments.length})
+              <CardTitle className="flex items-center justify-between">
+                <span className="flex items-center">
+                  <Calendar className="mr-2 h-5 w-5" />
+                  Historial de Citas ({appointments.length})
+                </span>
+                {hasPermission("appointments:write") && (
+                  <Button
+                    size="sm"
+                    onClick={() => setShowNewAppointmentModal(true)}
+                    disabled={!selectedDoctor}
+                  >
+                    <CalendarPlus className="mr-2 h-4 w-4" />
+                    Nueva Cita
+                  </Button>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
               {appointments.length > 0 ? (
                 <div className="space-y-4">
-                  {appointments.slice(0, 5).map((appointment) => (
-                    <div
-                      key={appointment.id}
-                      className="border rounded-lg p-4 hover:bg-gray-50"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h4 className="font-medium">{appointment.type}</h4>
-                          <p className="text-sm text-gray-600">
-                            {new Date(
-                              appointment.appointmentDate.toDate()
-                            ).toLocaleDateString("es-MX")}
-                          </p>
+                  {appointments
+                    .sort(
+                      (a, b) =>
+                        b.appointmentDate.toDate().getTime() -
+                        a.appointmentDate.toDate().getTime()
+                    )
+                    .map((appointment) => {
+                      const doctor = doctors.find(
+                        (d) => d.uid === appointment.doctorId
+                      );
+                      return (
+                        <div
+                          key={appointment.id}
+                          className="border rounded-lg p-4 hover:bg-gray-50"
+                        >
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <h4 className="font-medium">
+                                {getAppointmentTypeLabel(appointment.type)}
+                              </h4>
+                              <p className="text-sm text-gray-600">
+                                {appointment.appointmentDate
+                                  .toDate()
+                                  .toLocaleDateString("es-MX", {
+                                    weekday: "long",
+                                    year: "numeric",
+                                    month: "long",
+                                    day: "numeric",
+                                  })}{" "}
+                                a las{" "}
+                                {appointment.appointmentDate
+                                  .toDate()
+                                  .toLocaleTimeString("es-MX", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                              </p>
+                              <p className="text-sm text-gray-500">
+                                Dr.{" "}
+                                {doctor?.displayName ||
+                                  doctor?.email ||
+                                  "Doctor"}
+                              </p>
+                            </div>
+                            <Badge
+                              className={getAppointmentStatusColor(
+                                appointment.status
+                              )}
+                            >
+                              {getAppointmentStatusLabel(appointment.status)}
+                            </Badge>
+                          </div>
+                          <div className="text-sm">
+                            <p>
+                              <strong>Motivo:</strong>{" "}
+                              {appointment.reasonForVisit}
+                            </p>
+                            <p>
+                              <strong>Duración:</strong> {appointment.duration}{" "}
+                              minutos
+                            </p>
+                            {appointment.notes && (
+                              <p>
+                                <strong>Notas:</strong> {appointment.notes}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <Badge>{appointment.status}</Badge>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })}
                 </div>
               ) : (
                 <div className="text-center py-12">
@@ -569,6 +732,15 @@ export default function PatientDetailsPage() {
                   <p className="text-gray-500 mb-4">
                     Este paciente aún no tiene citas programadas.
                   </p>
+                  {hasPermission("appointments:write") && (
+                    <Button
+                      onClick={() => setShowNewAppointmentModal(true)}
+                      disabled={!selectedDoctor}
+                    >
+                      <CalendarPlus className="mr-2 h-4 w-4" />
+                      Programar Primera Cita
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -587,28 +759,59 @@ export default function PatientDetailsPage() {
             <CardContent>
               {treatments.length > 0 ? (
                 <div className="space-y-4">
-                  {treatments.slice(0, 5).map((treatment) => (
-                    <div
-                      key={treatment.id}
-                      className="border rounded-lg p-4 hover:bg-gray-50"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h4 className="font-medium">
-                            {treatment.treatment.description}
-                          </h4>
-                          <p className="text-sm text-gray-600">
-                            {new Date(
-                              treatment.date.toDate()
-                            ).toLocaleDateString("es-MX")}
-                          </p>
+                  {treatments
+                    .sort(
+                      (a, b) =>
+                        b.date.toDate().getTime() - a.date.toDate().getTime()
+                    )
+                    .map((treatment) => (
+                      <div
+                        key={treatment.id}
+                        className="border rounded-lg p-4 hover:bg-gray-50"
+                      >
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <h4 className="font-medium">
+                              {treatment.treatment.description}
+                            </h4>
+                            <p className="text-sm text-gray-600">
+                              {treatment.date
+                                .toDate()
+                                .toLocaleDateString("es-MX", {
+                                  weekday: "long",
+                                  year: "numeric",
+                                  month: "long",
+                                  day: "numeric",
+                                })}
+                            </p>
+                          </div>
+                          <span className="font-medium text-green-600">
+                            ${treatment.cost.total.toLocaleString()}
+                          </span>
                         </div>
-                        <span className="font-medium text-green-600">
-                          ${treatment.cost.total.toLocaleString()}
-                        </span>
+                        <div className="text-sm text-gray-600">
+                          {treatment.treatment.tooth &&
+                            treatment.treatment.tooth.length > 0 && (
+                              <p>
+                                <strong>Piezas dentales:</strong>{" "}
+                                {treatment.treatment.tooth.join(", ")}
+                              </p>
+                            )}
+                          {treatment.treatment.diagnosis && (
+                            <p>
+                              <strong>Diagnóstico:</strong>{" "}
+                              {treatment.treatment.diagnosis}
+                            </p>
+                          )}
+                          {treatment.treatment.notes && (
+                            <p>
+                              <strong>Notas:</strong>{" "}
+                              {treatment.treatment.notes}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               ) : (
                 <div className="text-center py-12">
@@ -619,6 +822,10 @@ export default function PatientDetailsPage() {
                   <p className="text-gray-500 mb-4">
                     Este paciente aún no tiene tratamientos en su historial.
                   </p>
+                  <Button variant="outline">
+                    <Activity className="mr-2 h-4 w-4" />
+                    Agregar Tratamiento
+                  </Button>
                 </div>
               )}
             </CardContent>
@@ -626,15 +833,19 @@ export default function PatientDetailsPage() {
         </TabsContent>
       </Tabs>
 
-      {/* New Appointment Modal */}
-      <NewAppointmentModal
-        isOpen={showNewAppointmentModal}
-        onClose={() => setShowNewAppointmentModal(false)}
-        onSubmit={handleCreateAppointment}
-        doctors={doctors}
-        patientName={patient.fullName}
-        isLoading={isLoading}
-      />
+      {/* NEW: Smart Calendar Appointment Modal with Pre-selected Patient */}
+      {selectedDoctor && (
+        <NewAppointmentModal
+          isOpen={showNewAppointmentModal}
+          onClose={() => setShowNewAppointmentModal(false)}
+          onSuccess={handleAppointmentCreated}
+          selectedTimeSlot={null} // No pre-selected time slot from patient page
+          selectedDoctor={selectedDoctor}
+          patients={[]} // Empty array since we're using preSelectedPatient
+          appointments={allDoctorAppointments} // Pass all doctor appointments for conflict detection
+          preSelectedPatient={patient} // Pass the current patient directly
+        />
+      )}
     </div>
   );
 }
