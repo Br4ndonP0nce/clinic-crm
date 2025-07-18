@@ -1,11 +1,9 @@
-// src/app/admin/billing/expenses/page.tsx
+// src/app/admin/billing/expenses/page.tsx - Updated to use reusable modal
 "use client";
 import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -15,15 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   CreditCard,
   Plus,
@@ -51,6 +40,7 @@ import {
   getExpenseCategoryLabel,
   ExpenseCategory,
 } from "@/types/billing";
+import AddExpenseModal from "@/components/billing/AddExpenseModal";
 
 // Skeleton Components
 const ExpenseCardSkeleton = () => (
@@ -98,223 +88,6 @@ const ExpensesListSkeleton = () => (
     ))}
   </div>
 );
-
-// Add Expense Dialog Component
-const AddExpenseDialog = ({
-  open,
-  onOpenChange,
-  onSubmit,
-  isLoading,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (expense: any) => void;
-  isLoading: boolean;
-}) => {
-  const [formData, setFormData] = useState({
-    description: "",
-    amount: "",
-    category: "office_supplies" as ExpenseCategory,
-    date: new Date().toISOString().split("T")[0],
-    vendor: "",
-    receiptNumber: "",
-    deductible: true,
-    notes: "",
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit({
-      ...formData,
-      amount: parseFloat(formData.amount),
-      date: new Date(formData.date),
-    });
-  };
-
-  const resetForm = () => {
-    setFormData({
-      description: "",
-      amount: "",
-      category: "office_supplies",
-      date: new Date().toISOString().split("T")[0],
-      vendor: "",
-      receiptNumber: "",
-      deductible: true,
-      notes: "",
-    });
-  };
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(isOpen) => {
-        onOpenChange(isOpen);
-        if (!isOpen) resetForm();
-      }}
-    >
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Registrar Nuevo Gasto</DialogTitle>
-          <DialogDescription>
-            Completa la información del gasto para registrarlo en el sistema.
-          </DialogDescription>
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="md:col-span-2">
-              <Label htmlFor="description">Descripción *</Label>
-              <Input
-                id="description"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
-                placeholder="Descripción del gasto"
-                required
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="amount">Monto *</Label>
-              <Input
-                id="amount"
-                type="number"
-                step="0.01"
-                min="0"
-                value={formData.amount}
-                onChange={(e) =>
-                  setFormData({ ...formData, amount: e.target.value })
-                }
-                placeholder="0.00"
-                required
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="category">Categoría *</Label>
-              <Select
-                value={formData.category}
-                onValueChange={(value) =>
-                  setFormData({
-                    ...formData,
-                    category: value as ExpenseCategory,
-                  })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="office_supplies">
-                    Material de Oficina
-                  </SelectItem>
-                  <SelectItem value="dental_supplies">
-                    Material Dental
-                  </SelectItem>
-                  <SelectItem value="equipment">Equipo</SelectItem>
-                  <SelectItem value="laboratory">Laboratorio</SelectItem>
-                  <SelectItem value="utilities">Servicios Públicos</SelectItem>
-                  <SelectItem value="rent">Renta</SelectItem>
-                  <SelectItem value="marketing">Marketing</SelectItem>
-                  <SelectItem value="continuing_education">
-                    Educación Continua
-                  </SelectItem>
-                  <SelectItem value="insurance">Seguros</SelectItem>
-                  <SelectItem value="professional_services">
-                    Servicios Profesionales
-                  </SelectItem>
-                  <SelectItem value="travel">Viajes</SelectItem>
-                  <SelectItem value="meals">Comidas de Negocio</SelectItem>
-                  <SelectItem value="software">Software</SelectItem>
-                  <SelectItem value="maintenance">Mantenimiento</SelectItem>
-                  <SelectItem value="taxes">Impuestos</SelectItem>
-                  <SelectItem value="other">Otros</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="date">Fecha *</Label>
-              <Input
-                id="date"
-                type="date"
-                value={formData.date}
-                onChange={(e) =>
-                  setFormData({ ...formData, date: e.target.value })
-                }
-                required
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="vendor">Proveedor</Label>
-              <Input
-                id="vendor"
-                value={formData.vendor}
-                onChange={(e) =>
-                  setFormData({ ...formData, vendor: e.target.value })
-                }
-                placeholder="Nombre del proveedor"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="receiptNumber">Número de Recibo</Label>
-              <Input
-                id="receiptNumber"
-                value={formData.receiptNumber}
-                onChange={(e) =>
-                  setFormData({ ...formData, receiptNumber: e.target.value })
-                }
-                placeholder="Número de factura/recibo"
-              />
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="deductible"
-                checked={formData.deductible}
-                onChange={(e) =>
-                  setFormData({ ...formData, deductible: e.target.checked })
-                }
-                className="rounded"
-              />
-              <Label htmlFor="deductible">Deducible de impuestos</Label>
-            </div>
-
-            <div className="md:col-span-2">
-              <Label htmlFor="notes">Notas</Label>
-              <Textarea
-                id="notes"
-                value={formData.notes}
-                onChange={(e) =>
-                  setFormData({ ...formData, notes: e.target.value })
-                }
-                placeholder="Notas adicionales sobre el gasto..."
-                rows={3}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? "Registrando..." : "Registrar Gasto"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-};
 
 // Expense Card Component
 const ExpenseCard = ({
@@ -506,9 +279,10 @@ export default function BillingExpensesPage() {
   const handleAddExpense = async (expenseData: any) => {
     try {
       await addExpense(expenseData);
-      setShowAddDialog(false);
+      // Modal will close automatically via the component
     } catch (error) {
       console.error("Error adding expense:", error);
+      throw error; // Re-throw to let modal handle the error
     }
   };
 
@@ -604,15 +378,6 @@ export default function BillingExpensesPage() {
             />
             Actualizar
           </Button>
-
-          {canManageBilling && (
-            <AddExpenseDialog
-              open={showAddDialog}
-              onOpenChange={setShowAddDialog}
-              onSubmit={handleAddExpense}
-              isLoading={loading}
-            />
-          )}
 
           {canManageBilling && (
             <Button onClick={() => setShowAddDialog(true)}>
@@ -888,6 +653,15 @@ export default function BillingExpensesPage() {
           </AnimatePresence>
         )}
       </div>
+
+      {/* Reusable Add Expense Modal */}
+      <AddExpenseModal
+        open={showAddDialog}
+        onOpenChange={setShowAddDialog}
+        onSubmit={handleAddExpense}
+        isLoading={loading}
+        triggerRefresh={refreshExpenses}
+      />
     </div>
   );
 }
