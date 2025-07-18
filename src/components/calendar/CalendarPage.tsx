@@ -1,4 +1,4 @@
-// Optimized CalendarPage.tsx
+// CalendarPage.tsx - Updated to integrate Smart Calendar Picker
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
@@ -23,6 +23,13 @@ import {
 } from "@/components/ui/select";
 import { Plus, AlertCircle, Users, Loader2 } from "lucide-react";
 
+// Import timezone utilities
+import {
+  timestampToLocalDate,
+  convertAppointmentToCalendarEvent,
+  debugTimezone,
+} from "@/lib/utils/datetime";
+
 // Import optimized components
 import { CalendarControls } from "@/components/calendar/CalendarControls";
 import { CalendarViews, CalendarStats } from "./views/CalendarViews";
@@ -33,48 +40,72 @@ import { AppointmentDetailsModal } from "@/components/calendar/AppointmentModals
 import { CalendarEvent } from "@/types/calendar";
 export type CalendarView = "month" | "week" | "day";
 
-// Custom hook for calendar data
+// Custom hook for calendar data with timezone fixes
 const useCalendarData = () => {
   const { userProfile } = useAuth();
   const [doctors, setDoctors] = useState<UserProfile[]>([]);
   const [selectedDoctor, setSelectedDoctor] = useState<string>("");
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [allAppointments, setAllAppointments] = useState<Appointment[]>([]); // For smart scheduling
   const [patients, setPatients] = useState<Patient[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState<CalendarView>("week");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Memoized date ranges
+  // Memoized date ranges with timezone fixes
   const dateRange = useMemo(() => {
     let startDate: Date, endDate: Date;
 
     switch (view) {
       case "month":
+        // Start from the first day of the month at 00:00:00 local time
         startDate = new Date(
           currentDate.getFullYear(),
           currentDate.getMonth(),
-          1
+          1,
+          0,
+          0,
+          0,
+          0
         );
+        // End at the last day of the month at 23:59:59 local time
         endDate = new Date(
           currentDate.getFullYear(),
           currentDate.getMonth() + 1,
-          0
+          0,
+          23,
+          59,
+          59,
+          999
         );
         break;
       case "week": {
+        // Get the start of the week (Monday) at 00:00:00 local time
         const start = new Date(currentDate);
         const day = start.getDay();
         const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-        start.setDate(diff);
-        startDate = start;
-        endDate = new Date(start);
-        endDate.setDate(start.getDate() + 6);
+        startDate = new Date(
+          start.getFullYear(),
+          start.getMonth(),
+          diff,
+          0,
+          0,
+          0,
+          0
+        );
+
+        // Get the end of the week (Sunday) at 23:59:59 local time
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+        endDate.setHours(23, 59, 59, 999);
         break;
       }
       case "day":
+        // Start of the day at 00:00:00 local time
         startDate = new Date(currentDate);
         startDate.setHours(0, 0, 0, 0);
+        // End of the day at 23:59:59 local time
         endDate = new Date(currentDate);
         endDate.setHours(23, 59, 59, 999);
         break;
@@ -82,6 +113,14 @@ const useCalendarData = () => {
         startDate = new Date();
         endDate = new Date();
     }
+
+    // Debug logging to verify date ranges
+    console.log("📅 Date Range:", {
+      view,
+      startDate: startDate.toLocaleString(),
+      endDate: endDate.toLocaleString(),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
 
     return { startDate, endDate };
   }, [currentDate, view]);
@@ -115,20 +154,66 @@ const useCalendarData = () => {
     }
   }, [userProfile]);
 
-  // Load appointments
+  // Load appointments with timezone fixes
   const loadAppointments = useCallback(async () => {
     if (!selectedDoctor) return;
 
     try {
+      // Load appointments for the current view (for display)
       const doctorAppointments = await getAppointments(
         dateRange.startDate,
         dateRange.endDate,
         selectedDoctor
       );
+
+      // Load ALL appointments for the selected doctor (for smart scheduling conflict detection)
+      // Get a wider range - 3 months forward from today
+      const today = new Date();
+      const futureDate = new Date();
+      futureDate.setMonth(today.getMonth() + 3);
+
+      const allDoctorAppointments = await getAppointments(
+        today,
+        futureDate,
+        selectedDoctor
+      );
+
+      console.log(
+        "🏥 Loaded Appointments for View:",
+        doctorAppointments.length
+      );
+      console.log(
+        "🏥 Loaded All Appointments for Smart Scheduling:",
+        allDoctorAppointments.length
+      );
+
       setAppointments(doctorAppointments);
+      setAllAppointments(allDoctorAppointments);
     } catch (err) {
       console.error("Error loading appointments:", err);
       setError("Error al cargar las citas");
+    }
+  }, [selectedDoctor, dateRange]);
+
+  // Reload all appointments (for after creating new appointments)
+  const reloadAllAppointments = useCallback(async () => {
+    if (!selectedDoctor) return;
+
+    try {
+      // Reload both sets of appointments
+      const today = new Date();
+      const futureDate = new Date();
+      futureDate.setMonth(today.getMonth() + 3);
+
+      const [doctorAppointments, allDoctorAppointments] = await Promise.all([
+        getAppointments(dateRange.startDate, dateRange.endDate, selectedDoctor),
+        getAppointments(today, futureDate, selectedDoctor),
+      ]);
+
+      setAppointments(doctorAppointments);
+      setAllAppointments(allDoctorAppointments);
+    } catch (err) {
+      console.error("Error reloading appointments:", err);
     }
   }, [selectedDoctor, dateRange]);
 
@@ -137,6 +222,7 @@ const useCalendarData = () => {
     selectedDoctor,
     setSelectedDoctor,
     appointments,
+    allAppointments, // Include all appointments for smart scheduling
     patients,
     currentDate,
     setCurrentDate,
@@ -147,6 +233,7 @@ const useCalendarData = () => {
     setError,
     loadInitialData,
     loadAppointments,
+    reloadAllAppointments,
   };
 };
 
@@ -158,6 +245,7 @@ export default function CalendarPage() {
     selectedDoctor,
     setSelectedDoctor,
     appointments,
+    allAppointments,
     patients,
     currentDate,
     setCurrentDate,
@@ -168,6 +256,7 @@ export default function CalendarPage() {
     setError,
     loadInitialData,
     loadAppointments,
+    reloadAllAppointments,
   } = useCalendarData();
 
   // Modal states
@@ -198,33 +287,38 @@ export default function CalendarPage() {
   }, []);
 
   const handleTimeSlotClick = useCallback((date: Date, time: string) => {
+    console.log("🎯 Time Slot Clicked:", {
+      date: date.toLocaleString(),
+      time,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
     setSelectedTimeSlot({ date, time });
     setShowAppointmentModal(true);
   }, []);
 
+  // FIXED: Use timezone-safe appointment click handler
   const handleAppointmentClick = useCallback(
     (appointment: Appointment) => {
       const patient = patients.find((p) => p.id === appointment.patientId);
       if (patient) {
         const doctor = doctors.find((d) => d.uid === appointment.doctorId);
-        const calendarEvent: CalendarEvent = {
-          id: appointment.id!,
-          title: patient.fullName,
-          start: appointment.appointmentDate.toDate(),
-          end: new Date(
-            appointment.appointmentDate.toDate().getTime() +
-              appointment.duration * 60000
-          ),
-          resource: {
-            appointment,
-            patient,
-            doctor: {
-              id: doctor?.uid || appointment.doctorId,
-              name: doctor?.displayName || doctor?.email || "Doctor",
-              email: doctor?.email,
-            },
-          },
-        };
+
+        // Use the timezone-safe conversion function
+        const calendarEvent: CalendarEvent = convertAppointmentToCalendarEvent(
+          appointment,
+          patient,
+          doctor
+        );
+
+        // Debug the converted event
+        console.log("🎯 Appointment Clicked:", {
+          appointmentId: appointment.id,
+          originalTimestamp: appointment.appointmentDate,
+          convertedStart: calendarEvent.start.toLocaleString(),
+          convertedEnd: calendarEvent.end.toLocaleString(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        });
+
         setSelectedCalendarEvent(calendarEvent);
         setShowDetailsModal(true);
       }
@@ -233,10 +327,11 @@ export default function CalendarPage() {
   );
 
   const handleAppointmentCreated = useCallback(() => {
-    loadAppointments();
+    // Reload all appointments to ensure the smart scheduler has the latest data
+    reloadAllAppointments();
     setShowAppointmentModal(false);
     setSelectedTimeSlot(null);
-  }, [loadAppointments]);
+  }, [reloadAllAppointments]);
 
   const handleCloseDetailsModal = useCallback(() => {
     setShowDetailsModal(false);
@@ -261,7 +356,10 @@ export default function CalendarPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold">Calendario</h1>
-            <p className="text-sm text-gray-600">Gestión de citas médicas</p>
+            <p className="text-sm text-gray-600">
+              Gestión de citas médicas -{" "}
+              {Intl.DateTimeFormat().resolvedOptions().timeZone}
+            </p>
           </div>
 
           {hasPermission("appointments:write") && (
@@ -326,7 +424,7 @@ export default function CalendarPage() {
               {selectedDoctor && (
                 <div className="text-sm text-gray-600">
                   {appointments.length} cita
-                  {appointments.length !== 1 ? "s" : ""}
+                  {appointments.length !== 1 ? "s" : ""} en vista actual
                 </div>
               )}
             </div>
@@ -343,7 +441,7 @@ export default function CalendarPage() {
               onViewChange={setView}
             />
 
-            {/* Calendar Views */}
+            {/* Calendar Views - Pass timezone-safe data */}
             <CalendarViews
               view={view}
               currentDate={currentDate}
@@ -368,9 +466,10 @@ export default function CalendarPage() {
           event={selectedCalendarEvent}
           open={showDetailsModal}
           onClose={handleCloseDetailsModal}
-          onUpdate={loadAppointments}
+          onUpdate={reloadAllAppointments}
         />
 
+        {/* Updated NewAppointmentModal with Smart Calendar Picker */}
         <NewAppointmentModal
           isOpen={showAppointmentModal}
           onClose={() => setShowAppointmentModal(false)}
@@ -378,6 +477,8 @@ export default function CalendarPage() {
           selectedTimeSlot={selectedTimeSlot}
           selectedDoctor={selectedDoctor}
           patients={patients}
+          appointments={allAppointments} // Pass all appointments for conflict detection
+          // No preSelectedPatient for calendar page - user should select
         />
       </div>
     </ProtectedRoute>

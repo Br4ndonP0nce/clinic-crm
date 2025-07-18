@@ -727,6 +727,199 @@ const ExpenseCard: React.FC<{
     </CardContent>
   </Card>
 );
+const RevenueSummaryWithExpenses: React.FC<{
+  revenueSummary: any;
+  expenses: Expense[];
+  reports: BillingReport[];
+  dateFilter: DateFilter;
+}> = ({ revenueSummary, expenses, reports, dateFilter }) => {
+  // Calculate expense totals for the current period
+  const periodExpenses = useMemo(() => {
+    const now = new Date();
+    const startOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+    const startOfWeek = new Date(startOfDay);
+    startOfWeek.setDate(startOfDay.getDate() - startOfDay.getDay());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+    const filterExpensesByPeriod = (startDate: Date) => {
+      return expenses
+        .filter((expense) => {
+          const expenseDate = expense.date.toDate();
+          return (
+            expenseDate >= startDate &&
+            (expense.status === "approved" || expense.status === "paid")
+          );
+        })
+        .reduce((sum, expense) => sum + expense.amount, 0);
+    };
+
+    return {
+      today: filterExpensesByPeriod(startOfDay),
+      thisWeek: filterExpensesByPeriod(startOfWeek),
+      thisMonth: filterExpensesByPeriod(startOfMonth),
+      thisYear: filterExpensesByPeriod(startOfYear),
+    };
+  }, [expenses]);
+
+  // Calculate net income
+  const netIncome = useMemo(
+    () => ({
+      today: (revenueSummary?.today || 0) - periodExpenses.today,
+      thisWeek: (revenueSummary?.thisWeek || 0) - periodExpenses.thisWeek,
+      thisMonth: (revenueSummary?.thisMonth || 0) - periodExpenses.thisMonth,
+      thisYear: (revenueSummary?.thisYear || 0) - periodExpenses.thisYear,
+    }),
+    [revenueSummary, periodExpenses]
+  );
+
+  const cards = [
+    {
+      title: "Ingresos Hoy",
+      value: revenueSummary?.today || 0,
+      expenses: periodExpenses.today,
+      netIncome: netIncome.today,
+      icon: Calendar,
+      color: "green",
+    },
+    {
+      title: "Ingresos Esta Semana",
+      value: revenueSummary?.thisWeek || 0,
+      expenses: periodExpenses.thisWeek,
+      netIncome: netIncome.thisWeek,
+      icon: TrendingUp,
+      color: "blue",
+    },
+    {
+      title: "Ingresos Este Mes",
+      value: revenueSummary?.thisMonth || 0,
+      expenses: periodExpenses.thisMonth,
+      netIncome: netIncome.thisMonth,
+      icon: DollarSign,
+      color: "purple",
+    },
+    {
+      title: "Ingresos Este Año",
+      value: revenueSummary?.thisYear || 0,
+      expenses: periodExpenses.thisYear,
+      netIncome: netIncome.thisYear,
+      icon: BarChart3,
+      color: "amber",
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Revenue vs Expenses Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {cards.map((card, index) => (
+          <Card key={index}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-sm text-gray-600">{card.title}</p>
+                  <p className={`text-xl font-bold text-${card.color}-600`}>
+                    {formatCurrency(card.value)}
+                  </p>
+                </div>
+                <card.icon className={`h-8 w-8 text-${card.color}-500`} />
+              </div>
+
+              {/* Expense and Net Income Info */}
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Gastos:</span>
+                  <span className="text-red-600 font-medium">
+                    {formatCurrency(card.expenses)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-gray-100">
+                  <span className="text-gray-600 font-medium">Neto:</span>
+                  <span
+                    className={`font-bold ${
+                      card.netIncome >= 0 ? "text-green-600" : "text-red-600"
+                    }`}
+                  >
+                    {formatCurrency(card.netIncome)}
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Current Period Summary */}
+      <Card className="bg-gradient-to-r from-blue-50 to-purple-50">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-800">
+                Resumen - {dateFilter.label}
+              </h3>
+              <p className="text-sm text-gray-600">
+                {dateFilter.start.toLocaleDateString("es-MX")} -{" "}
+                {dateFilter.end.toLocaleDateString("es-MX")}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-6 text-center">
+              <div>
+                <div className="text-sm text-gray-600">Ingresos</div>
+                <div className="text-xl font-bold text-green-600">
+                  {formatCurrency(
+                    reports.reduce((sum, r) => sum + r.paidAmount, 0)
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-gray-600">Gastos</div>
+                <div className="text-xl font-bold text-red-600">
+                  {formatCurrency(
+                    expenses
+                      .filter(
+                        (e) => e.status === "approved" || e.status === "paid"
+                      )
+                      .reduce((sum, e) => sum + e.amount, 0)
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-gray-600">Neto</div>
+                <div
+                  className={`text-xl font-bold ${
+                    reports.reduce((sum, r) => sum + r.paidAmount, 0) -
+                      expenses
+                        .filter(
+                          (e) => e.status === "approved" || e.status === "paid"
+                        )
+                        .reduce((sum, e) => sum + e.amount, 0) >=
+                    0
+                      ? "text-purple-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {formatCurrency(
+                    reports.reduce((sum, r) => sum + r.paidAmount, 0) -
+                      expenses
+                        .filter(
+                          (e) => e.status === "approved" || e.status === "paid"
+                        )
+                        .reduce((sum, e) => sum + e.amount, 0)
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
 
 // Main Dashboard Component
 export default function BillingDashboard() {
@@ -1056,48 +1249,12 @@ export default function BillingDashboard() {
 
       {/* Revenue Summary (Global) */}
       {revenueSummary && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            {
-              title: "Hoy",
-              value: revenueSummary.today,
-              icon: Calendar,
-              color: "green",
-            },
-            {
-              title: "Esta Semana",
-              value: revenueSummary.thisWeek,
-              icon: TrendingUp,
-              color: "blue",
-            },
-            {
-              title: "Este Mes",
-              value: revenueSummary.thisMonth,
-              icon: DollarSign,
-              color: "purple",
-            },
-            {
-              title: "Este Año",
-              value: revenueSummary.thisYear,
-              icon: BarChart3,
-              color: "amber",
-            },
-          ].map((card, index) => (
-            <Card key={index}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">{card.title}</p>
-                    <p className={`text-xl font-bold text-${card.color}-600`}>
-                      {formatCurrency(card.value)}
-                    </p>
-                  </div>
-                  <card.icon className={`h-8 w-8 text-${card.color}-500`} />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <RevenueSummaryWithExpenses
+          revenueSummary={revenueSummary}
+          expenses={expenses}
+          reports={reports}
+          dateFilter={dateFilter}
+        />
       )}
 
       {/* Main Tabs */}
@@ -1292,6 +1449,177 @@ export default function BillingDashboard() {
               Exportar Análisis
             </Button>
           </div>
+          {/* Financial Overview Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">
+                  Ingresos del Período
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">
+                  {formatCurrency(
+                    reports.reduce((sum, r) => sum + r.paidAmount, 0)
+                  )}
+                </div>
+                <p className="text-sm text-gray-500">
+                  {reports.length} reportes completados
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">
+                  Gastos del Período
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-red-600">
+                  {formatCurrency(
+                    expenses
+                      .filter(
+                        (e) => e.status === "approved" || e.status === "paid"
+                      )
+                      .reduce((sum, e) => sum + e.amount, 0)
+                  )}
+                </div>
+                <p className="text-sm text-gray-500">
+                  {
+                    expenses.filter(
+                      (e) => e.status === "approved" || e.status === "paid"
+                    ).length
+                  }{" "}
+                  gastos aprobados
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">
+                  Ingresos Netos
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div
+                  className={`text-2xl font-bold ${
+                    reports.reduce((sum, r) => sum + r.paidAmount, 0) -
+                      expenses
+                        .filter(
+                          (e) => e.status === "approved" || e.status === "paid"
+                        )
+                        .reduce((sum, e) => sum + e.amount, 0) >=
+                    0
+                      ? "text-purple-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {formatCurrency(
+                    reports.reduce((sum, r) => sum + r.paidAmount, 0) -
+                      expenses
+                        .filter(
+                          (e) => e.status === "approved" || e.status === "paid"
+                        )
+                        .reduce((sum, e) => sum + e.amount, 0)
+                  )}
+                </div>
+                <p className="text-sm text-gray-500">Ganancia del período</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Expense Category Breakdown */}
+          {expenses.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <CreditCard className="h-5 w-5 mr-2" />
+                    Gastos por Categoría
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {Object.entries(
+                      expenses
+                        .filter(
+                          (e) => e.status === "approved" || e.status === "paid"
+                        )
+                        .reduce((acc, expense) => {
+                          const category = getExpenseCategoryLabel(
+                            expense.category
+                          );
+                          acc[category] = (acc[category] || 0) + expense.amount;
+                          return acc;
+                        }, {} as Record<string, number>)
+                    ).map(([category, amount], index) => (
+                      <div
+                        key={category}
+                        className="flex items-center justify-between"
+                      >
+                        <div className="flex items-center">
+                          <div
+                            className="w-4 h-4 rounded-full mr-3"
+                            style={{
+                              backgroundColor: [
+                                "#3b82f6",
+                                "#ef4444",
+                                "#10b981",
+                                "#f59e0b",
+                                "#8b5cf6",
+                                "#06b6d4",
+                                "#84cc16",
+                                "#f97316",
+                              ][index % 8],
+                            }}
+                          />
+                          <span className="text-sm font-medium">
+                            {category}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-semibold">
+                            {formatCurrency(amount)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {(
+                              (amount /
+                                expenses
+                                  .filter(
+                                    (e) =>
+                                      e.status === "approved" ||
+                                      e.status === "paid"
+                                  )
+                                  .reduce((sum, e) => sum + e.amount, 0)) *
+                              100
+                            ).toFixed(1)}
+                            %
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Existing charts or add expense trends */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <TrendingUp className="h-5 w-5 mr-2" />
+                    Tendencias Mensuales
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-center text-gray-500 py-8">
+                    Gráficos de tendencias financieras
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           {dashboard ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

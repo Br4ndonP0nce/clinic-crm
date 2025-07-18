@@ -5,8 +5,12 @@ import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { PermissionGate } from "@/components/auth/PermissionGate";
 import { useAuth } from "@/hooks/useAuth";
-import { getPatients, Patient } from "@/lib/firebase/db";
+import { getPatients, getAppointments, Patient } from "@/lib/firebase/db";
+import { getAllUsers, UserProfile } from "@/lib/firebase/rbac";
 import { exportPatientsToExcel } from "@/lib/utils/exportPatientsToExcel";
+
+// Import the smart appointment modal
+import { NewAppointmentModal } from "@/components/calendar/NewAppointmentModal";
 
 import PatientTable from "@/components/ui/admin/PatientTable";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +28,7 @@ import {
   MoreHorizontal,
   Eye,
   EyeOff,
+  CalendarPlus,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -61,11 +66,14 @@ const STATUS_CONFIG: Record<
 };
 
 export default function PatientsPage() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, userProfile } = useAuth();
   const router = useRouter();
 
   // Core data state
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [doctors, setDoctors] = useState<UserProfile[]>([]);
+  const [allDoctorAppointments, setAllDoctorAppointments] = useState<any[]>([]);
+  const [selectedDoctor, setSelectedDoctor] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,6 +82,11 @@ export default function PatientsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isExporting, setIsExporting] = useState(false);
   const [showStats, setShowStats] = useState(false);
+
+  // Modal state
+  const [showNewAppointmentModal, setShowNewAppointmentModal] = useState(false);
+  const [selectedPatientForAppointment, setSelectedPatientForAppointment] =
+    useState<Patient | null>(null);
 
   // Type guard for patient status
   const isValidPatientStatus = (status: string): status is PatientStatus => {
@@ -124,23 +137,66 @@ export default function PatientsPage() {
     return filtered;
   }, [patients, activeTab, searchTerm]);
 
-  // Data fetching
+  // Load initial data
   useEffect(() => {
-    const fetchPatients = async () => {
+    const fetchInitialData = async () => {
       try {
         setIsLoading(true);
-        const fetchedPatients = await getPatients();
+        const [fetchedPatients, allUsers] = await Promise.all([
+          getPatients(),
+          getAllUsers(),
+        ]);
+
         setPatients(fetchedPatients);
+
+        // Filter doctors
+        const doctorUsers = allUsers.filter(
+          (user) => user.role === "doctor" && user.isActive
+        );
+        setDoctors(doctorUsers);
+
+        // Auto-select doctor
+        if (userProfile?.role === "doctor") {
+          setSelectedDoctor(userProfile.uid);
+        } else if (doctorUsers.length > 0) {
+          setSelectedDoctor(doctorUsers[0].uid);
+        }
       } catch (err) {
-        console.error("Error fetching patients:", err);
-        setError("Error al cargar pacientes");
+        console.error("Error fetching data:", err);
+        setError("Error al cargar datos");
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchPatients();
-  }, []);
+    fetchInitialData();
+  }, [userProfile]);
+
+  // Load doctor appointments for smart scheduling
+  useEffect(() => {
+    const loadDoctorAppointments = async () => {
+      if (!selectedDoctor) return;
+
+      try {
+        // Load appointments for the next 3 months for conflict detection
+        const today = new Date();
+        const futureDate = new Date();
+        futureDate.setMonth(today.getMonth() + 3);
+
+        const doctorAppointments = await getAppointments(
+          today,
+          futureDate,
+          selectedDoctor
+        );
+
+        setAllDoctorAppointments(doctorAppointments);
+      } catch (error) {
+        console.error("Error loading doctor appointments:", error);
+      }
+    };
+
+    loadDoctorAppointments();
+  }, [selectedDoctor]);
 
   // Event handlers
   const handleStatusChange = async (
@@ -167,9 +223,46 @@ export default function PatientsPage() {
     }
   };
 
-  const clearError = () => setError(null);
+  // NEW: Handle quick appointment creation
+  const handleQuickAppointment = (patient: Patient) => {
+    if (!selectedDoctor) {
+      setError("No hay doctor seleccionado para crear la cita");
+      return;
+    }
+    setSelectedPatientForAppointment(patient);
+    setShowNewAppointmentModal(true);
+  };
 
-  // Mobile-first statistics component (removed as we're using inline buttons now)
+  // NEW: Handle appointment creation success
+  const handleAppointmentCreated = async () => {
+    try {
+      // Reload doctor appointments for future scheduling
+      if (selectedDoctor) {
+        const today = new Date();
+        const futureDate = new Date();
+        futureDate.setMonth(today.getMonth() + 3);
+
+        const doctorAppointments = await getAppointments(
+          today,
+          futureDate,
+          selectedDoctor
+        );
+
+        setAllDoctorAppointments(doctorAppointments);
+      }
+
+      // Close modal and clear selected patient
+      setShowNewAppointmentModal(false);
+      setSelectedPatientForAppointment(null);
+
+      // Optional: Show success message or refresh patient data
+      console.log("Appointment created successfully");
+    } catch (error) {
+      console.error("Error refreshing data:", error);
+    }
+  };
+
+  const clearError = () => setError(null);
 
   if (isLoading) {
     return (
@@ -357,6 +450,12 @@ export default function PatientsPage() {
                 <PatientTable
                   patients={filteredPatients}
                   onStatusChange={handleStatusChange}
+                  onQuickAppointment={
+                    hasPermission("appointments:write")
+                      ? handleQuickAppointment
+                      : undefined
+                  }
+                  showQuickActions={hasPermission("appointments:write")}
                 />
               </CardContent>
             </Card>
@@ -368,7 +467,31 @@ export default function PatientsPage() {
           <div className="text-sm text-gray-600 text-center">
             Mostrando {filteredPatients.length} de {stats.total} pacientes
             {searchTerm && ` para "${searchTerm}"`}
+            {selectedDoctor && doctors.length > 0 && (
+              <span className="ml-2">
+                • Doctor:{" "}
+                {doctors.find((d) => d.uid === selectedDoctor)?.displayName ||
+                  "Seleccionado"}
+              </span>
+            )}
           </div>
+        )}
+
+        {/* Smart Appointment Modal */}
+        {selectedPatientForAppointment && selectedDoctor && (
+          <NewAppointmentModal
+            isOpen={showNewAppointmentModal}
+            onClose={() => {
+              setShowNewAppointmentModal(false);
+              setSelectedPatientForAppointment(null);
+            }}
+            onSuccess={handleAppointmentCreated}
+            selectedTimeSlot={null} // No pre-selected time slot
+            selectedDoctor={selectedDoctor}
+            patients={[]} // Empty array since we're using preSelectedPatient
+            appointments={allDoctorAppointments} // Pass all doctor appointments for conflict detection
+            preSelectedPatient={selectedPatientForAppointment} // Pass the selected patient directly
+          />
         )}
       </div>
     </ProtectedRoute>

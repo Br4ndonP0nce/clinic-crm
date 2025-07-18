@@ -1,9 +1,17 @@
-// Optimized CalendarViews.tsx
+// CalendarViews.tsx - TIMEZONE FIXED VERSION
 import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Calendar1, Clock, Stethoscope } from "lucide-react";
 import { Appointment, Patient } from "@/lib/firebase/db";
 import { CalendarView } from "../CalendarPage";
+import { Button } from "@/components/ui/button";
+// Import timezone utilities
+import {
+  timestampToLocalDate,
+  createLocalDateTime,
+  formatDateForInput,
+  formatTimeForInput,
+} from "@/lib/utils/datetime";
 
 interface CalendarViewsProps {
   view: CalendarView;
@@ -16,6 +24,11 @@ interface CalendarViewsProps {
   canCreateAppointments: boolean;
 }
 
+interface CalendarViewProps extends CalendarViewsProps {
+  showDetailedSlots?: boolean;
+  onToggleDetailedSlots?: () => void;
+}
+
 const APPOINTMENT_TYPES = [
   { value: "consultation", label: "Consulta", color: "bg-blue-500" },
   { value: "cleaning", label: "Limpieza", color: "bg-green-500" },
@@ -24,7 +37,13 @@ const APPOINTMENT_TYPES = [
   { value: "emergency", label: "Emergencia", color: "bg-red-500" },
 ];
 
-const TIME_SLOTS = Array.from({ length: 20 }, (_, i) => {
+const TIME_SLOTS = Array.from({ length: 10 }, (_, i) => {
+  const hour = 8 + i; // Start at 8 AM, go to 6 PM (10 hours)
+  return `${hour.toString().padStart(2, "0")}:00`;
+});
+
+// Optional: Add 30-minute slots for shorter appointments (like follow-ups)
+const TIME_SLOTS_DETAILED = Array.from({ length: 20 }, (_, i) => {
   const hour = Math.floor(8 + i / 2);
   const minute = (i % 2) * 30;
   return `${hour.toString().padStart(2, "0")}:${minute
@@ -32,7 +51,7 @@ const TIME_SLOTS = Array.from({ length: 20 }, (_, i) => {
     .padStart(2, "0")}`;
 });
 
-// Utility functions
+// Utility functions with timezone fixes
 const getWeekDays = (currentDate: Date) => {
   const start = new Date(currentDate);
   const day = start.getDay();
@@ -62,23 +81,70 @@ const getMonthDays = (currentDate: Date) => {
   });
 };
 
+// FIXED: Timezone-safe appointment slot matching for hourly slots
 const getAppointmentForSlot = (
   appointments: Appointment[],
   date: Date,
   time: string
 ) => {
-  const slotDateTime = new Date(`${date.toISOString().split("T")[0]}T${time}`);
+  // Create local date for the slot using our timezone utilities
+  const slotDateTime = createLocalDateTime(formatDateForInput(date), time);
+
   return appointments.find((apt) => {
-    const aptDate = apt.appointmentDate.toDate();
-    return aptDate.getTime() === slotDateTime.getTime();
+    // Convert Firestore timestamp to local date
+    const aptDate = timestampToLocalDate(apt.appointmentDate);
+
+    // Compare the times with a small tolerance (within the same minute)
+    const timeDiff = Math.abs(aptDate.getTime() - slotDateTime.getTime());
+    const withinTolerance = timeDiff < 60000; // 1 minute tolerance
+
+    return withinTolerance;
   });
 };
 
-const getAppointmentsForDay = (appointments: Appointment[], date: Date) => {
-  return appointments.filter((apt) => {
-    const aptDate = apt.appointmentDate.toDate();
-    return aptDate.toDateString() === date.toDateString();
+// NEW: For hourly slots, find any appointment that starts within that hour
+const getAppointmentForHourSlot = (
+  appointments: Appointment[],
+  date: Date,
+  hourTime: string // e.g., "09:00"
+) => {
+  const hourStart = createLocalDateTime(formatDateForInput(date), hourTime);
+  const hourEnd = new Date(hourStart.getTime() + 60 * 60 * 1000); // Add 1 hour
+
+  return appointments.find((apt) => {
+    const aptDate = timestampToLocalDate(apt.appointmentDate);
+
+    // Check if appointment starts within this hour slot
+    return aptDate >= hourStart && aptDate < hourEnd;
   });
+};
+
+// FIXED: Timezone-safe day appointment matching
+const getAppointmentsForDay = (appointments: Appointment[], date: Date) => {
+  const dayAppointments = appointments.filter((apt) => {
+    // Convert Firestore timestamp to local date
+    const aptDate = timestampToLocalDate(apt.appointmentDate);
+
+    // Compare only the date parts (year, month, day)
+    const isSameDay =
+      aptDate.getFullYear() === date.getFullYear() &&
+      aptDate.getMonth() === date.getMonth() &&
+      aptDate.getDate() === date.getDate();
+
+    // Debug logging
+    if (isSameDay) {
+      console.log("📅 Found appointment for day:", {
+        targetDate: date.toDateString(),
+        appointmentDate: aptDate.toDateString(),
+        appointmentTime: aptDate.toLocaleTimeString(),
+        appointmentId: apt.id,
+      });
+    }
+
+    return isSameDay;
+  });
+
+  return dayAppointments;
 };
 
 // Appointment component
@@ -99,6 +165,11 @@ const AppointmentCard: React.FC<{
     (t) => t.value === appointment.type
   );
 
+  // Use timezone-safe date conversion for display
+  const appointmentLocalDate = timestampToLocalDate(
+    appointment.appointmentDate
+  );
+
   return (
     <div
       className={`p-1 rounded text-white text-xs cursor-pointer transition-opacity hover:opacity-90 ${
@@ -110,7 +181,7 @@ const AppointmentCard: React.FC<{
     >
       {compact ? (
         <div className="truncate font-medium">
-          {appointment.appointmentDate.toDate().toLocaleTimeString("es-MX", {
+          {appointmentLocalDate.toLocaleTimeString("es-MX", {
             hour: "2-digit",
             minute: "2-digit",
           })}
@@ -178,7 +249,14 @@ const TimeSlot: React.FC<{
   return canCreate ? (
     <div
       className="w-full h-full flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer hover:bg-blue-50"
-      onClick={() => onTimeSlotClick(date, time)}
+      onClick={() => {
+        console.log("🎯 Time slot clicked:", {
+          date: date.toDateString(),
+          time,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        });
+        onTimeSlotClick(date, time);
+      }}
     >
       <Plus className="h-4 w-4 text-gray-400" />
     </div>
@@ -284,24 +362,40 @@ const MonthView: React.FC<CalendarViewsProps> = ({
   );
 };
 
-// Week View
-const WeekView: React.FC<CalendarViewsProps> = ({
+// Week View with optional detailed slots
+const WeekView: React.FC<CalendarViewProps> = ({
   currentDate,
   appointments,
   patients,
   onTimeSlotClick,
   onAppointmentClick,
   canCreateAppointments,
+  showDetailedSlots = false,
+  onToggleDetailedSlots,
 }) => {
   const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
+  const timeSlots = showDetailedSlots ? TIME_SLOTS_DETAILED : TIME_SLOTS;
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base flex items-center">
-          <Calendar1 className="mr-2 h-4 w-4" />
-          Vista Semanal
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center">
+            <Calendar1 className="mr-2 h-4 w-4" />
+            Vista Semanal
+          </CardTitle>
+          {/* Optional toggle for detailed view */}
+          {onToggleDetailedSlots && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onToggleDetailedSlots}
+              className="text-xs"
+            >
+              {showDetailedSlots ? "Horario 1h" : "Horario 30min"}
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
@@ -348,20 +442,22 @@ const WeekView: React.FC<CalendarViewsProps> = ({
 
             {/* Time slots */}
             <div className="max-h-[500px] overflow-y-auto">
-              {TIME_SLOTS.map((time) => (
+              {timeSlots.map((time) => (
                 <div
                   key={time}
-                  className="grid grid-cols-8 border-b hover:bg-gray-50"
+                  className={`grid grid-cols-8 border-b hover:bg-gray-50 ${
+                    showDetailedSlots ? "min-h-[50px]" : "min-h-[80px]"
+                  }`}
                 >
                   <div className="p-2 border-r bg-gray-50 text-center text-sm font-medium">
                     {time}
                   </div>
                   {weekDays.map((day, dayIndex) => {
-                    const appointment = getAppointmentForSlot(
-                      appointments,
-                      day,
-                      time
-                    );
+                    // For hourly slots, we need to check if ANY appointment falls within this hour
+                    const appointment = showDetailedSlots
+                      ? getAppointmentForSlot(appointments, day, time)
+                      : getAppointmentForHourSlot(appointments, day, time);
+
                     const patient = appointment
                       ? patients.find((p) => p.id === appointment.patientId)
                       : undefined;
@@ -370,9 +466,9 @@ const WeekView: React.FC<CalendarViewsProps> = ({
                     return (
                       <div
                         key={dayIndex}
-                        className={`p-1 border-r min-h-[50px] ${
-                          isWeekend ? "bg-gray-100" : ""
-                        }`}
+                        className={`p-1 border-r ${
+                          showDetailedSlots ? "min-h-[50px]" : "min-h-[80px]"
+                        } ${isWeekend ? "bg-gray-100" : ""}`}
                       >
                         <TimeSlot
                           date={day}
@@ -397,35 +493,50 @@ const WeekView: React.FC<CalendarViewsProps> = ({
   );
 };
 
-// Day View
-const DayView: React.FC<CalendarViewsProps> = ({
+// Day View with optional detailed slots
+const DayView: React.FC<CalendarViewProps> = ({
   currentDate,
   appointments,
   patients,
   onTimeSlotClick,
   onAppointmentClick,
   canCreateAppointments,
+  showDetailedSlots = false,
+  onToggleDetailedSlots,
 }) => {
+  const timeSlots = showDetailedSlots ? TIME_SLOTS_DETAILED : TIME_SLOTS;
+
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base flex items-center">
-          <Calendar1 className="mr-2 h-4 w-4" />
-          {currentDate.toLocaleDateString("es-MX", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-          })}
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center">
+            <Calendar1 className="mr-2 h-4 w-4" />
+            {currentDate.toLocaleDateString("es-MX", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+            })}
+          </CardTitle>
+          {onToggleDetailedSlots && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onToggleDetailedSlots}
+              className="text-xs"
+            >
+              {showDetailedSlots ? "Horario 1h" : "Horario 30min"}
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="max-h-[500px] overflow-y-auto">
-          {TIME_SLOTS.map((time) => {
-            const appointment = getAppointmentForSlot(
-              appointments,
-              currentDate,
-              time
-            );
+          {timeSlots.map((time) => {
+            const appointment = showDetailedSlots
+              ? getAppointmentForSlot(appointments, currentDate, time)
+              : getAppointmentForHourSlot(appointments, currentDate, time);
+
             const patient = appointment
               ? patients.find((p) => p.id === appointment.patientId)
               : undefined;
@@ -435,7 +546,11 @@ const DayView: React.FC<CalendarViewsProps> = ({
                 <div className="w-16 p-3 border-r bg-gray-50 text-center text-sm font-medium">
                   {time}
                 </div>
-                <div className="flex-1 p-2 min-h-[60px]">
+                <div
+                  className={`flex-1 p-2 ${
+                    showDetailedSlots ? "min-h-[60px]" : "min-h-[80px]"
+                  }`}
+                >
                   <TimeSlot
                     date={currentDate}
                     time={time}
@@ -455,15 +570,28 @@ const DayView: React.FC<CalendarViewsProps> = ({
   );
 };
 
-// Main Views Component
+// Main Views Component with view density options
 export const CalendarViews: React.FC<CalendarViewsProps> = (props) => {
   const { view } = props;
+
+  // State for detailed slot view toggle
+  const [showDetailedSlots, setShowDetailedSlots] = React.useState(false);
+
+  const handleToggleDetailedSlots = () => {
+    setShowDetailedSlots(!showDetailedSlots);
+  };
+
+  const viewProps = {
+    ...props,
+    showDetailedSlots,
+    onToggleDetailedSlots: handleToggleDetailedSlots,
+  };
 
   return (
     <>
       {view === "month" && <MonthView {...props} />}
-      {view === "week" && <WeekView {...props} />}
-      {view === "day" && <DayView {...props} />}
+      {view === "week" && <WeekView {...viewProps} />}
+      {view === "day" && <DayView {...viewProps} />}
     </>
   );
 };
@@ -483,12 +611,12 @@ export const CalendarStats: React.FC<CalendarStatsProps> = ({
     const weekDays = getWeekDays(currentDate);
 
     return {
-      today: appointments.filter(
-        (apt) =>
-          apt.appointmentDate.toDate().toDateString() === today.toDateString()
-      ).length,
+      today: appointments.filter((apt) => {
+        const aptDate = timestampToLocalDate(apt.appointmentDate);
+        return aptDate.toDateString() === today.toDateString();
+      }).length,
       week: appointments.filter((apt) => {
-        const aptDate = apt.appointmentDate.toDate();
+        const aptDate = timestampToLocalDate(apt.appointmentDate);
         return weekDays.some(
           (day) => day.toDateString() === aptDate.toDateString()
         );
