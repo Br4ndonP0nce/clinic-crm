@@ -1,4 +1,4 @@
-// src/components/billing/AddExpenseModal.tsx
+// components/billing/AddExpenseModal.tsx - Updated with Empty Date Requirement
 "use client";
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -67,11 +67,11 @@ interface AddExpenseModalProps {
   title?: string;
   description?: string;
   defaultCategory?: ExpenseCategory;
-  defaultDate?: string;
+  defaultDate?: string; // Can be empty string to force user selection
   triggerRefresh?: () => void;
 }
 
-// Form validation
+// Enhanced form validation with empty date handling
 const validateForm = (
   formData: ExpenseFormData
 ): { isValid: boolean; errors: string[] } => {
@@ -89,18 +89,28 @@ const validateForm = (
     errors.push("El monto no puede ser mayor a $999,999");
   }
 
+  // Enhanced date validation - now requires explicit selection
   if (!formData.date) {
-    errors.push("La fecha es obligatoria");
-  }
+    errors.push("Debe seleccionar una fecha");
+  } else {
+    const selectedDate = new Date(formData.date);
+    const today = new Date();
+    const maxFutureDate = new Date();
+    maxFutureDate.setDate(today.getDate() + 30); // Allow up to 30 days in future
 
-  // Validate future dates (optional business rule)
-  const selectedDate = new Date(formData.date);
-  const today = new Date();
-  const maxFutureDate = new Date();
-  maxFutureDate.setDate(today.getDate() + 30); // Allow up to 30 days in future
+    // Check for invalid date
+    if (isNaN(selectedDate.getTime())) {
+      errors.push("La fecha seleccionada no es válida");
+    } else if (selectedDate > maxFutureDate) {
+      errors.push("La fecha no puede ser más de 30 días en el futuro");
+    }
 
-  if (selectedDate > maxFutureDate) {
-    errors.push("La fecha no puede ser más de 30 días en el futuro");
+    // Check for very old dates (more than 2 years ago)
+    const twoYearsAgo = new Date();
+    twoYearsAgo.setFullYear(today.getFullYear() - 2);
+    if (selectedDate < twoYearsAgo) {
+      errors.push("La fecha no puede ser más de 2 años en el pasado");
+    }
   }
 
   return {
@@ -218,6 +228,38 @@ const EXPENSE_CATEGORIES = [
   },
 ] as const;
 
+// Quick date presets for common selections
+const QUICK_DATES = [
+  {
+    label: "Hoy",
+    getValue: () => new Date().toISOString().split("T")[0],
+  },
+  {
+    label: "Ayer",
+    getValue: () => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      return yesterday.toISOString().split("T")[0];
+    },
+  },
+  {
+    label: "Hace 3 días",
+    getValue: () => {
+      const threeDaysAgo = new Date();
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+      return threeDaysAgo.toISOString().split("T")[0];
+    },
+  },
+  {
+    label: "Hace 1 semana",
+    getValue: () => {
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+      return oneWeekAgo.toISOString().split("T")[0];
+    },
+  },
+];
+
 const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   open,
   onOpenChange,
@@ -226,14 +268,14 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   title = "Registrar Nuevo Gasto",
   description = "Completa la información del gasto para registrarlo en el sistema.",
   defaultCategory = "office_supplies",
-  defaultDate,
+  defaultDate = "", // Default to empty string
   triggerRefresh,
 }) => {
   const [formData, setFormData] = useState<ExpenseFormData>({
     description: "",
     amount: "",
     category: defaultCategory,
-    date: defaultDate || new Date().toISOString().split("T")[0],
+    date: "", // Always start empty
     vendor: "",
     receiptNumber: "",
     deductible: true,
@@ -254,19 +296,12 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     }
   }, [open]);
 
-  // Auto-set date if defaultDate changes
-  useEffect(() => {
-    if (defaultDate) {
-      setFormData((prev) => ({ ...prev, date: defaultDate }));
-    }
-  }, [defaultDate]);
-
   const resetForm = () => {
     setFormData({
       description: "",
       amount: "",
       category: defaultCategory,
-      date: defaultDate || new Date().toISOString().split("T")[0],
+      date: "", // Always reset to empty
       vendor: "",
       receiptNumber: "",
       deductible: true,
@@ -278,6 +313,10 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 
   const handleQuickAmount = (amount: number) => {
     setFormData((prev) => ({ ...prev, amount: amount.toString() }));
+  };
+
+  const handleQuickDate = (dateValue: string) => {
+    setFormData((prev) => ({ ...prev, date: dateValue }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -334,6 +373,8 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const selectedCategory = EXPENSE_CATEGORIES.find(
     (cat) => cat.value === formData.category
   );
+
+  const isDateEmpty = !formData.date;
 
   return (
     <>
@@ -489,22 +530,56 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                 )}
               </div>
 
-              {/* Date */}
-              <div>
+              {/* Enhanced Date Selection with Quick Presets */}
+              <div className="md:col-span-2">
                 <Label htmlFor="date" className="flex items-center gap-2">
                   <CalendarIcon className="h-4 w-4" />
-                  Fecha *
+                  Fecha *{" "}
+                  {isDateEmpty && (
+                    <span className="text-red-500 text-xs">(Requerido)</span>
+                  )}
                 </Label>
-                <Input
-                  id="date"
-                  type="date"
-                  value={formData.date}
-                  onChange={(e) =>
-                    setFormData({ ...formData, date: e.target.value })
-                  }
-                  required
-                  className="mt-1"
-                />
+                <div className="space-y-2">
+                  <Input
+                    id="date"
+                    type="date"
+                    value={formData.date}
+                    onChange={(e) =>
+                      setFormData({ ...formData, date: e.target.value })
+                    }
+                    required
+                    className={`mt-1 ${
+                      isDateEmpty ? "border-red-300 focus:border-red-500" : ""
+                    }`}
+                    placeholder="Selecciona una fecha"
+                  />
+
+                  {/* Quick Date Selection */}
+                  <div className="flex flex-wrap gap-1">
+                    <span className="text-xs text-gray-500 mr-2 self-center">
+                      Acceso rápido:
+                    </span>
+                    {QUICK_DATES.map((preset) => (
+                      <Button
+                        key={preset.label}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleQuickDate(preset.getValue())}
+                        className="text-xs h-6 px-2"
+                      >
+                        {preset.label}
+                      </Button>
+                    ))}
+                  </div>
+
+                  {isDateEmpty && (
+                    <p className="text-xs text-red-600 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      Por favor selecciona la fecha en que se realizó el gasto
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Vendor */}
@@ -585,41 +660,43 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
             </div>
 
             {/* Summary Preview */}
-            {formData.amount && parseFloat(formData.amount) > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-4 bg-gray-50 rounded-lg border"
-              >
-                <h4 className="font-medium mb-2">Resumen del Gasto</h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-600">Monto:</span>
-                    <span className="ml-2 font-semibold text-red-600">
-                      {formatCurrency(parseFloat(formData.amount))}
-                    </span>
+            {formData.amount &&
+              parseFloat(formData.amount) > 0 &&
+              formData.date && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-4 bg-gray-50 rounded-lg border"
+                >
+                  <h4 className="font-medium mb-2">Resumen del Gasto</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-600">Monto:</span>
+                      <span className="ml-2 font-semibold text-red-600">
+                        {formatCurrency(parseFloat(formData.amount))}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Categoría:</span>
+                      <span className="ml-2 font-semibold">
+                        {selectedCategory?.label}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Fecha:</span>
+                      <span className="ml-2 font-semibold">
+                        {new Date(formData.date).toLocaleDateString("es-MX")}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Deducible:</span>
+                      <span className="ml-2 font-semibold">
+                        {formData.deductible ? "Sí" : "No"}
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-gray-600">Categoría:</span>
-                    <span className="ml-2 font-semibold">
-                      {selectedCategory?.label}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Fecha:</span>
-                    <span className="ml-2 font-semibold">
-                      {new Date(formData.date).toLocaleDateString("es-MX")}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Deducible:</span>
-                    <span className="ml-2 font-semibold">
-                      {formData.deductible ? "Sí" : "No"}
-                    </span>
-                  </div>
-                </div>
-              </motion.div>
-            )}
+                </motion.div>
+              )}
 
             <DialogFooter className="gap-2">
               <Button
@@ -630,7 +707,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
               >
                 Cancelar
               </Button>
-              <Button type="submit" disabled={isLoading}>
+              <Button type="submit" disabled={isLoading || isDateEmpty}>
                 {isLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -650,34 +727,38 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirmar Registro de Gasto</AlertDialogTitle>
-            <AlertDialogDescription className="space-y-2">
-              <p>¿Estás seguro de que deseas registrar este gasto?</p>
-
-              <div className="p-3 bg-gray-50 rounded-lg mt-3">
-                <div className="space-y-1 text-sm">
-                  <div>
-                    <strong>Descripción:</strong> {formData.description}
-                  </div>
-                  <div>
-                    <strong>Monto:</strong>{" "}
-                    {formatCurrency(parseFloat(formData.amount))}
-                  </div>
-                  <div>
-                    <strong>Categoría:</strong> {selectedCategory?.label}
-                  </div>
-                  <div>
-                    <strong>Fecha:</strong>{" "}
-                    {new Date(formData.date).toLocaleDateString("es-MX")}
-                  </div>
-                  {formData.vendor && (
-                    <div>
-                      <strong>Proveedor:</strong> {formData.vendor}
-                    </div>
-                  )}
-                </div>
-              </div>
+            <AlertDialogDescription>
+              ¿Estás seguro de que deseas registrar este gasto?
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {/* Move the details outside of AlertDialogDescription */}
+          <div className="space-y-2 px-6">
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <div className="space-y-1 text-sm">
+                <div>
+                  <strong>Descripción:</strong> {formData.description}
+                </div>
+                <div>
+                  <strong>Monto:</strong>{" "}
+                  {formatCurrency(parseFloat(formData.amount))}
+                </div>
+                <div>
+                  <strong>Categoría:</strong> {selectedCategory?.label}
+                </div>
+                <div>
+                  <strong>Fecha:</strong>{" "}
+                  {new Date(formData.date).toLocaleDateString("es-MX")}
+                </div>
+                {formData.vendor && (
+                  <div>
+                    <strong>Proveedor:</strong> {formData.vendor}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isLoading}>Revisar</AlertDialogCancel>
             <AlertDialogAction

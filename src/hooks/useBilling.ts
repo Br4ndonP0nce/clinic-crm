@@ -1,4 +1,4 @@
-// src/hooks/useBilling.ts
+// src/hooks/useBilling.ts - CLEAN APPROACH (No Backward Compatibility)
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { 
@@ -7,7 +7,13 @@ import {
   Expense, 
   BillingDashboard,
   BillingService,
-  BillingPayment
+  BillingPayment,
+  // 🆕 NEW: Multiple Reports Support
+  BillingReportSummary,
+  AppointmentBillingSummary,
+  CreateReportOptions,
+  DuplicateReportOptions,
+  BillingReportType
 } from '@/types/billing';
 import {
   getBillingReports,
@@ -22,12 +28,21 @@ import {
   updateExpenseStatus,
   getBillingDashboard,
   getRevenueSummary,
-  updateBillingNotes
+  updateBillingNotes,
+  // 🆕 NEW: Multiple Reports Functions
+  getBillingReportsByAppointment,
+  getAppointmentBillingSummary,
+  duplicateBillingReport,
+  archiveBillingReport,
+  createPartialReport,
+  createEmergencyAddonReport,
+  createProductSaleReport,
+  linkBillingReports
 } from '@/lib/firebase/billing';
 import { useAuth } from './useAuth';
 
 // =============================================================================
-// BILLING REPORTS HOOK
+// BILLING REPORTS HOOK (Clean New Approach)
 // =============================================================================
 
 interface UseBillingReportsReturn {
@@ -36,15 +51,22 @@ interface UseBillingReportsReturn {
   error: string | null;
   hasMore: boolean;
   
-  // Actions
-  loadReports: (filters?: any) => Promise<void>;
+  // Core Actions (New Clean Approach)
+  loadReports: (filters?: any, reset?: boolean) => Promise<void>;
   loadMore: () => Promise<void>;
   refreshReports: () => Promise<void>;
-  createReport: (appointmentId: string, initialServices?: any[]) => Promise<string>;
+  refresh: () => Promise<void>; // 🆕 ADD: Alias for compatibility
+  createReport: (appointmentId: string, options: CreateReportOptions, initialServices?: any[]) => Promise<string>;
+  createCompleteVisitReport: (appointmentId: string, title?: string, initialServices?: any[]) => Promise<string>;
   updateServices: (reportId: string, services: BillingService[], discount?: number) => Promise<void>;
   addPayment: (reportId: string, payment: BillingPaymentInput) => Promise<void>;
   completeReport: (reportId: string, notes?: string) => Promise<void>;
   updateNotes: (reportId: string, notes: string, internalNotes: string) => Promise<void>;
+  
+  // Enhanced Actions
+  duplicateReport: (sourceReportId: string, options: DuplicateReportOptions) => Promise<string>;
+  archiveReport: (reportId: string, reason?: string) => Promise<void>;
+  linkReports: (reportIds: string[], linkType: 'related' | 'consolidated' | 'split', notes?: string) => Promise<void>;
 }
 
 export const useBillingReports = (): UseBillingReportsReturn => {
@@ -56,14 +78,29 @@ export const useBillingReports = (): UseBillingReportsReturn => {
   const [lastDoc, setLastDoc] = useState<any>(null);
   const [currentFilters, setCurrentFilters] = useState<any>({});
 
-  const loadReports = useCallback(async (filters: any = {}) => {
+  const loadReports = useCallback(async (filters: any = {}, reset: boolean = false) => {
     try {
       setLoading(true);
       setError(null);
       setCurrentFilters(filters);
       
-      const result = await getBillingReports({ ...filters, limit: 20 });
-      setReports(result.reports);
+      // If reset is true, clear lastDoc to start fresh
+      if (reset) {
+        setLastDoc(null);
+      }
+      
+      const result = await getBillingReports({ 
+        ...filters, 
+        limit: 20,
+        lastDoc: reset ? undefined : lastDoc 
+      });
+      
+      if (reset) {
+        setReports(result.reports);
+      } else {
+        setReports(prev => [...prev, ...result.reports]);
+      }
+      
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore);
     } catch (err) {
@@ -72,7 +109,7 @@ export const useBillingReports = (): UseBillingReportsReturn => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [lastDoc]);
 
   const loadMore = useCallback(async () => {
     if (!hasMore || loading || !lastDoc) return;
@@ -97,21 +134,95 @@ export const useBillingReports = (): UseBillingReportsReturn => {
   }, [hasMore, loading, lastDoc, currentFilters]);
 
   const refreshReports = useCallback(async () => {
-    await loadReports(currentFilters);
+    await loadReports(currentFilters, true); // Use reset=true for refresh
   }, [loadReports, currentFilters]);
 
+  // ✅ CLEAN: Main create report function (requires options)
   const createReport = useCallback(async (
-    appointmentId: string, 
+    appointmentId: string,
+    options: CreateReportOptions,
     initialServices?: any[]
   ): Promise<string> => {
     if (!userProfile?.uid) throw new Error('User not authenticated');
     
     try {
-      const reportId = await createBillingReport(appointmentId, userProfile.uid, initialServices);
+      const reportId = await createBillingReport(
+        appointmentId, 
+        userProfile.uid, 
+        options,
+        initialServices
+      );
       await refreshReports();
       return reportId;
     } catch (err) {
       console.error('Error creating billing report:', err);
+      throw err;
+    }
+  }, [userProfile?.uid, refreshReports]);
+
+  // ✅ CLEAN: Convenience function for most common use case
+  const createCompleteVisitReport = useCallback(async (
+    appointmentId: string,
+    title: string = 'Consulta Completa',
+    initialServices?: any[]
+  ): Promise<string> => {
+    return createReport(appointmentId, {
+      reportType: 'complete_visit',
+      title,
+      isPartialReport: false
+    }, initialServices);
+  }, [createReport]);
+
+  // 🆕 NEW: Duplicate report
+  const duplicateReport = useCallback(async (
+    sourceReportId: string,
+    options: DuplicateReportOptions
+  ): Promise<string> => {
+    if (!userProfile?.uid) throw new Error('User not authenticated');
+    
+    try {
+      const reportId = await duplicateBillingReport(
+        sourceReportId,
+        userProfile.uid,
+        options
+      );
+      await refreshReports();
+      return reportId;
+    } catch (err) {
+      console.error('Error duplicating billing report:', err);
+      throw err;
+    }
+  }, [userProfile?.uid, refreshReports]);
+
+  // 🆕 NEW: Archive report
+  const archiveReport = useCallback(async (
+    reportId: string,
+    reason?: string
+  ): Promise<void> => {
+    if (!userProfile?.uid) throw new Error('User not authenticated');
+    
+    try {
+      await archiveBillingReport(reportId, userProfile.uid, reason);
+      await refreshReports();
+    } catch (err) {
+      console.error('Error archiving billing report:', err);
+      throw err;
+    }
+  }, [userProfile?.uid, refreshReports]);
+
+  // 🆕 NEW: Link reports
+  const linkReports = useCallback(async (
+    reportIds: string[],
+    linkType: 'related' | 'consolidated' | 'split',
+    notes?: string
+  ): Promise<void> => {
+    if (!userProfile?.uid) throw new Error('User not authenticated');
+    
+    try {
+      await linkBillingReports(reportIds, linkType, userProfile.uid, notes);
+      await refreshReports();
+    } catch (err) {
+      console.error('Error linking billing reports:', err);
       throw err;
     }
   }, [userProfile?.uid, refreshReports]);
@@ -183,16 +294,21 @@ export const useBillingReports = (): UseBillingReportsReturn => {
     loadReports,
     loadMore,
     refreshReports,
+    refresh: refreshReports, // 🆕 ADD: Alias for backward compatibility
     createReport,
+    createCompleteVisitReport,
     updateServices,
     addPayment,
     completeReport,
-    updateNotes
+    updateNotes,
+    duplicateReport,
+    archiveReport,
+    linkReports
   };
 };
 
 // =============================================================================
-// SINGLE BILLING REPORT HOOK
+// SINGLE BILLING REPORT HOOK (Unchanged)
 // =============================================================================
 
 interface UseBillingReportReturn {
@@ -200,7 +316,7 @@ interface UseBillingReportReturn {
   loading: boolean;
   error: string | null;
   
-  // Actions
+  // Existing Actions
   loadReport: (reportId: string) => Promise<void>;
   loadReportByAppointment: (appointmentId: string) => Promise<void>;
   updateServices: (services: BillingService[], discount?: number) => Promise<void>;
@@ -335,7 +451,198 @@ export const useBillingReport = (reportId?: string): UseBillingReportReturn => {
 };
 
 // =============================================================================
-// EXPENSES HOOK
+// 🆕 NEW: APPOINTMENT BILLING HOOK (Multiple Reports per Appointment)
+// =============================================================================
+
+interface UseAppointmentBillingReturn {
+  reports: BillingReportSummary[];
+  summary: AppointmentBillingSummary | null;
+  loading: boolean;
+  error: string | null;
+  
+  // Actions
+  loadAppointmentBilling: (appointmentId: string) => Promise<void>;
+  createReport: (appointmentId: string, options: CreateReportOptions, initialServices?: any[]) => Promise<string>;
+  createQuickReport: (appointmentId: string, type: 'emergency' | 'product' | 'partial', services?: any[]) => Promise<string>;
+  duplicateReport: (sourceReportId: string, options: DuplicateReportOptions) => Promise<string>;
+  archiveReport: (reportId: string, reason?: string) => Promise<void>;
+  refreshData: () => Promise<void>;
+}
+
+export const useAppointmentBilling = (appointmentId?: string): UseAppointmentBillingReturn => {
+  const { userProfile } = useAuth();
+  const [reports, setReports] = useState<BillingReportSummary[]>([]);
+  const [summary, setSummary] = useState<AppointmentBillingSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [currentAppointmentId, setCurrentAppointmentId] = useState<string | null>(null);
+
+  const loadAppointmentBilling = useCallback(async (id: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      setCurrentAppointmentId(id);
+      
+      const [reportsData, summaryData] = await Promise.all([
+        getBillingReportsByAppointment(id),
+        getAppointmentBillingSummary(id)
+      ]);
+      
+      setReports(reportsData);
+      
+      // ✅ FIXED: Create complete AppointmentBillingSummary object
+      const completeSummary: AppointmentBillingSummary = {
+        appointmentId: id,
+        totalReports: summaryData.totalReports,
+        totalAmount: summaryData.totalAmount,
+        totalPaid: summaryData.totalPaid,
+        totalPending: summaryData.totalPending,
+        hasCompletedReports: summaryData.hasCompletedReports,
+        hasDraftReports: summaryData.hasDraftReports,
+        reportTypes: summaryData.reportTypes,
+        reports: reportsData // Include the reports array
+      };
+      
+      setSummary(completeSummary);
+    } catch (err) {
+      console.error('Error loading appointment billing:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load appointment billing');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const refreshData = useCallback(async () => {
+    if (currentAppointmentId) {
+      await loadAppointmentBilling(currentAppointmentId);
+    }
+  }, [currentAppointmentId, loadAppointmentBilling]);
+
+  const createReport = useCallback(async (
+    appointmentId: string,
+    options: CreateReportOptions,
+    initialServices?: any[]
+  ): Promise<string> => {
+    if (!userProfile?.uid) throw new Error('User not authenticated');
+    
+    try {
+      const reportId = await createBillingReport(
+        appointmentId,
+        userProfile.uid,
+        options,
+        initialServices
+      );
+      
+      await refreshData();
+      return reportId;
+    } catch (err) {
+      console.error('Error creating report:', err);
+      throw err;
+    }
+  }, [userProfile?.uid, refreshData]);
+
+  const createQuickReport = useCallback(async (
+    appointmentId: string,
+    type: 'emergency' | 'product' | 'partial',
+    services?: any[]
+  ): Promise<string> => {
+    if (!userProfile?.uid) throw new Error('User not authenticated');
+    
+    try {
+      let reportId: string;
+
+      switch (type) {
+        case 'emergency':
+          reportId = await createEmergencyAddonReport(
+            appointmentId,
+            services || [],
+            userProfile.uid
+          );
+          break;
+        case 'product':
+          reportId = await createProductSaleReport(
+            appointmentId,
+            services || [],
+            userProfile.uid
+          );
+          break;
+        case 'partial':
+          reportId = await createPartialReport(
+            appointmentId,
+            'Tratamiento Adicional',
+            services || [],
+            userProfile.uid
+          );
+          break;
+      }
+
+      await refreshData();
+      return reportId;
+    } catch (err) {
+      console.error('Error creating quick report:', err);
+      throw err;
+    }
+  }, [userProfile?.uid, refreshData]);
+
+  const duplicateReport = useCallback(async (
+    sourceReportId: string,
+    options: DuplicateReportOptions
+  ): Promise<string> => {
+    if (!userProfile?.uid) throw new Error('User not authenticated');
+    
+    try {
+      const reportId = await duplicateBillingReport(
+        sourceReportId,
+        userProfile.uid,
+        options
+      );
+      
+      await refreshData();
+      return reportId;
+    } catch (err) {
+      console.error('Error duplicating report:', err);
+      throw err;
+    }
+  }, [userProfile?.uid, refreshData]);
+
+  const archiveReport = useCallback(async (
+    reportId: string,
+    reason?: string
+  ): Promise<void> => {
+    if (!userProfile?.uid) throw new Error('User not authenticated');
+    
+    try {
+      await archiveBillingReport(reportId, userProfile.uid, reason);
+      await refreshData();
+    } catch (err) {
+      console.error('Error archiving report:', err);
+      throw err;
+    }
+  }, [userProfile?.uid, refreshData]);
+
+  // Auto-load when appointmentId changes
+  useEffect(() => {
+    if (appointmentId && appointmentId !== currentAppointmentId) {
+      loadAppointmentBilling(appointmentId);
+    }
+  }, [appointmentId, currentAppointmentId, loadAppointmentBilling]);
+
+  return {
+    reports,
+    summary,
+    loading,
+    error,
+    loadAppointmentBilling,
+    createReport,
+    createQuickReport,
+    duplicateReport,
+    archiveReport,
+    refreshData
+  };
+};
+
+// =============================================================================
+// EXPENSES HOOK (Unchanged)
 // =============================================================================
 
 interface UseExpensesReturn {
@@ -419,7 +726,7 @@ export const useExpenses = (): UseExpensesReturn => {
 };
 
 // =============================================================================
-// BILLING DASHBOARD HOOK
+// BILLING DASHBOARD HOOK (Unchanged)
 // =============================================================================
 
 interface UseBillingDashboardReturn {
@@ -494,5 +801,86 @@ export const useBillingDashboard = (): UseBillingDashboardReturn => {
     loadDashboard,
     loadRevenueSummary,
     refreshDashboard
+  };
+};
+
+// =============================================================================
+// 🆕 NEW: BILLING STATISTICS HOOK
+// =============================================================================
+
+interface UseBillingStatsReturn {
+  stats: {
+    totalRevenue: number;
+    pendingAmount: number;
+    reportsCount: number;
+    completedReports: number;
+    paidReports: number;
+    overdueReports: number;
+  } | null;
+  loading: boolean;
+  error: string | null;
+  
+  // Actions
+  loadStats: (filters?: any) => Promise<void>;
+  refreshStats: () => Promise<void>;
+}
+
+export const useBillingStats = (): UseBillingStatsReturn => {
+  const [stats, setStats] = useState<{
+    totalRevenue: number;
+    pendingAmount: number;
+    reportsCount: number;
+    completedReports: number;
+    paidReports: number;
+    overdueReports: number;
+  } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [currentFilters, setCurrentFilters] = useState<any>({});
+
+  const loadStats = useCallback(async (filters: any = {}) => {
+    try {
+      setLoading(true);
+      setError(null);
+      setCurrentFilters(filters);
+      
+      // Load reports and calculate stats
+      const { reports } = await getBillingReports({
+        ...filters,
+        limit: 1000 // Get a large sample for stats
+      });
+      
+      const calculatedStats = {
+        totalRevenue: reports.reduce((sum, report) => sum + (report.total || 0), 0),
+        pendingAmount: reports.reduce((sum, report) => sum + (report.pendingAmount || 0), 0),
+        reportsCount: reports.length,
+        completedReports: reports.filter(r => r.status === 'completed' || r.status === 'paid').length,
+        paidReports: reports.filter(r => r.status === 'paid').length,
+        overdueReports: reports.filter(r => {
+          if (!r.dueDate || r.status === 'paid') return false;
+          const dueDate = r.dueDate.toDate();
+          return dueDate < new Date() && (r.pendingAmount || 0) > 0;
+        }).length
+      };
+      
+      setStats(calculatedStats);
+    } catch (err) {
+      console.error('Error loading billing stats:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load billing statistics');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const refreshStats = useCallback(async () => {
+    await loadStats(currentFilters);
+  }, [loadStats, currentFilters]);
+
+  return {
+    stats,
+    loading,
+    error,
+    loadStats,
+    refreshStats
   };
 };

@@ -1,6 +1,15 @@
-// src/types/billing.ts
+// src/types/billing.ts - UPDATED with Multiple Reports Support
 import { Timestamp } from 'firebase/firestore';
 import { DentalProduct, PaymentMethod } from './sales';
+
+// 🆕 NEW: Report type definitions
+export type BillingReportType = 
+  | 'complete_visit'      // Complete appointment report
+  | 'partial_treatment'   // Specific treatment within visit
+  | 'product_sale'        // Product purchases
+  | 'additional_service'  // Additional services
+  | 'emergency_addon'     // Emergency add-on services
+  | 'insurance_claim';    // Insurance-specific report
 
 export interface BillingReport {
   id?: string;
@@ -9,6 +18,22 @@ export interface BillingReport {
   appointmentId: string;
   patientId: string;
   doctorId: string;
+  
+  // 🆕 NEW: Enhanced Report Metadata (all optional for backward compatibility)
+  reportType?: BillingReportType;
+  reportTitle?: string;
+  reportDescription?: string;
+  isPartialReport?: boolean;
+  parentReportId?: string;
+  reportSequence?: number;
+  
+  // 🆕 NEW: Report Relationships (optional)
+  linkedReports?: string[];
+  linkType?: 'related' | 'consolidated' | 'split';
+  linkId?: string;
+  linkNotes?: string;
+  linkedBy?: string;
+  linkedAt?: Timestamp;
   
   // Report Status
   status: 'draft' | 'completed' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled';
@@ -39,6 +64,11 @@ export interface BillingReport {
   // PDF Generation
   pdfGenerated: boolean;
   pdfUrl?: string;
+  
+  // 🆕 NEW: Archive Information (optional)
+  archivedAt?: Timestamp;
+  archivedBy?: string;
+  archiveReason?: string;
   
   // System Fields
   createdAt: Timestamp;
@@ -113,7 +143,50 @@ export type DentalServiceCategory =
   | 'consultation'         // Consultations, second opinions
   | 'other';
 
-// Expense Tracking
+// 🆕 NEW: Multiple Reports Support Interfaces
+export interface BillingReportSummary {
+  id: string;
+  title: string;
+  status: BillingReport['status'];
+  total: number;
+  paidAmount: number;
+  pendingAmount: number;
+  invoiceNumber?: string;
+  createdAt: Timestamp;
+  reportType: BillingReportType;
+  isPartialReport: boolean;
+}
+
+export interface AppointmentBillingSummary {
+  appointmentId: string;          // 🆕 REQUIRED
+  totalReports: number;
+  totalAmount: number;
+  totalPaid: number;
+  totalPending: number;
+  hasCompletedReports: boolean;
+  hasDraftReports: boolean;
+  reportTypes: BillingReportType[];
+  reports: BillingReportSummary[]; // 🆕 REQUIRED
+}
+
+export interface CreateReportOptions {
+  reportType: BillingReportType;
+  title: string;
+  description?: string;
+  isPartialReport?: boolean;
+  parentReportId?: string;
+  includePreviousServices?: boolean;
+}
+
+export interface DuplicateReportOptions {
+  newTitle: string;
+  newDescription?: string;
+  reportType?: BillingReportType;
+  includeServices?: boolean;
+  includePayments?: boolean;
+}
+
+// Expense Tracking (unchanged)
 export interface Expense {
   id?: string;
   
@@ -164,7 +237,7 @@ export type ExpenseCategory =
   | 'taxes'                // Business taxes, fees
   | 'other';
 
-// Financial Dashboard Data
+// Financial Dashboard Data (unchanged)
 export interface BillingDashboard {
   period: {
     start: Timestamp;
@@ -224,7 +297,7 @@ export interface MonthlyTrend {
   reportCount: number;
 }
 
-// Invoice Template Data
+// Invoice Template Data (unchanged)
 export interface InvoiceData {
   // Practice Information
   practice: {
@@ -270,7 +343,7 @@ export interface InvoiceData {
   termsAndConditions?: string;
 }
 
-// Export interfaces for Excel reports
+// Export interfaces for Excel reports (unchanged)
 export interface BillingExportData {
   reportId: string;
   appointmentDate: string;
@@ -304,7 +377,7 @@ export interface ExpenseExportData {
   notes?: string;
 }
 
-// Helper functions
+// Helper functions (existing + new)
 export const getBillingStatusLabel = (status: BillingReport['status']): string => {
   const labels: Record<BillingReport['status'], string> = {
     draft: 'Borrador',
@@ -315,6 +388,31 @@ export const getBillingStatusLabel = (status: BillingReport['status']): string =
     cancelled: 'Cancelado'
   };
   return labels[status] || status;
+};
+
+// 🆕 NEW: Report type helper functions
+export const getReportTypeLabel = (reportType: BillingReportType): string => {
+  const labels: Record<BillingReportType, string> = {
+    complete_visit: 'Consulta Completa',
+    partial_treatment: 'Tratamiento Parcial',
+    product_sale: 'Venta de Productos',
+    additional_service: 'Servicio Adicional',
+    emergency_addon: 'Servicio de Emergencia',
+    insurance_claim: 'Reclamo de Seguro'
+  };
+  return labels[reportType] || reportType;
+};
+
+export const getReportTypeColor = (reportType: BillingReportType): string => {
+  const colors: Record<BillingReportType, string> = {
+    complete_visit: 'purple',
+    partial_treatment: 'blue',
+    product_sale: 'green',
+    additional_service: 'orange',
+    emergency_addon: 'red',
+    insurance_claim: 'indigo'
+  };
+  return colors[reportType] || 'gray';
 };
 
 export const getServiceCategoryLabel = (category: DentalServiceCategory): string => {
@@ -357,12 +455,74 @@ export const getExpenseCategoryLabel = (category: ExpenseCategory): string => {
   return labels[category] || category;
 };
 
-// Constants
+// 🆕 NEW: Validation utilities
+export const validateBillingService = (service: Partial<BillingService>): string[] => {
+  const errors: string[] = [];
+  
+  if (!service.description?.trim()) {
+    errors.push('La descripción del servicio es requerida');
+  }
+  
+  if (!service.quantity || service.quantity <= 0) {
+    errors.push('La cantidad debe ser mayor a 0');
+  }
+  
+  if (service.unitPrice === undefined || service.unitPrice < 0) {
+    errors.push('El precio unitario debe ser mayor o igual a 0');
+  }
+  
+  if (!service.category) {
+    errors.push('La categoría del servicio es requerida');
+  }
+  
+  return errors;
+};
+
+export const validateBillingReport = (report: Partial<BillingReport>): string[] => {
+  const errors: string[] = [];
+  
+  if (!report.appointmentId) {
+    errors.push('El ID de la cita es requerido');
+  }
+  
+  if (!report.patientId) {
+    errors.push('El ID del paciente es requerido');
+  }
+  
+  if (!report.doctorId) {
+    errors.push('El ID del doctor es requerido');
+  }
+  
+  if (!report.services || report.services.length === 0) {
+    errors.push('Al menos un servicio es requerido');
+  }
+  
+  if (report.services) {
+    report.services.forEach((service, index) => {
+      const serviceErrors = validateBillingService(service);
+      serviceErrors.forEach(error => {
+        errors.push(`Servicio ${index + 1}: ${error}`);
+      });
+    });
+  }
+  
+  if (report.discount && report.discount < 0) {
+    errors.push('El descuento no puede ser negativo');
+  }
+  
+  if (report.subtotal && report.discount && report.discount > report.subtotal) {
+    errors.push('El descuento no puede ser mayor al subtotal');
+  }
+  
+  return errors;
+};
+
+// Constants (unchanged)
 export const MEXICAN_TAX_RATE = 0.16; // 16% IVA
 export const DEFAULT_PAYMENT_TERMS = '30 días';
 export const INVOICE_NUMBER_PREFIX = 'FAC-';
 
-// Utility functions
+// Utility functions (unchanged)
 export const calculateTax = (subtotal: number): number => {
   return Math.round(subtotal * MEXICAN_TAX_RATE * 100) / 100;
 };
@@ -379,4 +539,24 @@ export const generateInvoiceNumber = (): string => {
   const timestamp = now.getTime().toString().slice(-4);
   
   return `${INVOICE_NUMBER_PREFIX}${year}${month}${day}-${timestamp}`;
+};
+
+// 🆕 NEW: Report calculation utilities
+export const calculateReportTotals = (
+  services: BillingService[],
+  discount: number = 0
+): {
+  subtotal: number;
+  tax: number;
+  total: number;
+} => {
+  const subtotal = services.reduce((sum, service) => sum + (service.total || 0), 0);
+  const tax = calculateTax(subtotal);
+  const total = calculateTotal(subtotal, tax, discount);
+  
+  return { subtotal, tax, total };
+};
+
+export const calculateServiceTotal = (quantity: number, unitPrice: number): number => {
+  return Math.round(quantity * unitPrice * 100) / 100;
 };
