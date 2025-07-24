@@ -1,4 +1,4 @@
-// src/app/admin/page.tsx - Optimized Dental Practice Dashboard
+// src/app/admin/page.tsx - Updated with Schedule Widget Integration
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
@@ -16,6 +16,8 @@ import {
 } from "@/lib/firebase/db";
 import { useRouter } from "next/navigation";
 
+// 🆕 Import the Schedule Summary Widget
+import ScheduleSummaryWidget from "@/components/ui/dashboard/ScheduleSummaryWidget";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -111,6 +113,8 @@ export default function DentalDashboard() {
     canViewTreatments,
     canViewBilling,
     canEditPatients,
+    canViewSchedules, // 🆕 Add schedule permissions
+    isDoctor,
     role,
     getDefaultRoute,
   } = usePermissions();
@@ -126,6 +130,7 @@ export default function DentalDashboard() {
   const [compactView, setCompactView] = useState(false);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const { hasUnviewed, count } = useFeatureAnnouncements(role);
+
   // Memoized calculations
   const stats: DashboardStats = useMemo(() => {
     const patientsByStatus = (
@@ -147,12 +152,14 @@ export default function DentalDashboard() {
       recentAppointments: todaysAppointments.slice(0, 3),
     };
   }, [patients, todaysAppointments]);
+
   useEffect(() => {
     const timer = setTimeout(() => {
       setShowAnnouncementModal(true);
     }, 1500);
     return () => clearTimeout(timer);
   }, []);
+
   // Data fetching
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -431,6 +438,9 @@ export default function DentalDashboard() {
             </PermissionGate>
           </div>
 
+          {/* 🆕 Schedule Widget - Always visible for doctors and schedule viewers */}
+          {canViewSchedules && <ScheduleSummaryWidget />}
+
           {/* Detailed Stats Toggle */}
           <div className="flex justify-center">
             <Button
@@ -450,7 +460,7 @@ export default function DentalDashboard() {
 
           {/* Detailed Content */}
           {showDetailedStats && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               {/* Patient Status Distribution */}
               <Card>
                 <CardHeader className="pb-3">
@@ -590,6 +600,14 @@ export default function DentalDashboard() {
                   </CardContent>
                 </Card>
               </PermissionGate>
+
+              {/* 🆕 Schedule Widget in Detailed View (alternative placement) */}
+              {/* Uncomment this if you prefer the schedule widget only in detailed view */}
+              {/*
+              {canViewSchedules && (
+                <ScheduleSummaryWidget />
+              )}
+              */}
             </div>
           )}
 

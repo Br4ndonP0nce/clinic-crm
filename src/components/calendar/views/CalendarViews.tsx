@@ -1,10 +1,12 @@
-// CalendarViews.tsx - TIMEZONE FIXED VERSION
-import React, { useMemo } from "react";
+// src/components/calendar/views/CalendarViews.tsx - UPDATED WITH SCHEDULE INTEGRATION
+import React, { useMemo, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Calendar1, Clock, Stethoscope } from "lucide-react";
 import { Appointment, Patient } from "@/lib/firebase/db";
 import { CalendarView } from "../CalendarPage";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+
 // Import timezone utilities
 import {
   timestampToLocalDate,
@@ -12,6 +14,13 @@ import {
   formatDateForInput,
   formatTimeForInput,
 } from "@/lib/utils/datetime";
+
+// NEW: Import schedule functions
+import {
+  getDoctorSchedule,
+  getDayOfWeekFromDate,
+  DoctorSchedule,
+} from "@/lib/firebase/doctor-schedule";
 
 interface CalendarViewsProps {
   view: CalendarView;
@@ -37,19 +46,44 @@ const APPOINTMENT_TYPES = [
   { value: "emergency", label: "Emergencia", color: "bg-red-500" },
 ];
 
-const TIME_SLOTS = Array.from({ length: 10 }, (_, i) => {
+// Default time slots (fallback when no schedule is available)
+const TIME_SLOTS_DEFAULT = Array.from({ length: 10 }, (_, i) => {
   const hour = 8 + i; // Start at 8 AM, go to 6 PM (10 hours)
   return `${hour.toString().padStart(2, "0")}:00`;
 });
 
-// Optional: Add 30-minute slots for shorter appointments (like follow-ups)
-const TIME_SLOTS_DETAILED = Array.from({ length: 20 }, (_, i) => {
+const TIME_SLOTS_DETAILED_DEFAULT = Array.from({ length: 20 }, (_, i) => {
   const hour = Math.floor(8 + i / 2);
   const minute = (i % 2) * 30;
   return `${hour.toString().padStart(2, "0")}:${minute
     .toString()
     .padStart(2, "0")}`;
 });
+
+// NEW: Generate time slots based on doctor's schedule
+const generateTimeSlotsForDay = (
+  startTime: string,
+  endTime: string,
+  intervalMinutes: number = 60
+): string[] => {
+  const slots: string[] = [];
+
+  const start = new Date(`2000-01-01T${startTime}:00`);
+  const end = new Date(`2000-01-01T${endTime}:00`);
+
+  let current = new Date(start);
+
+  while (current < end) {
+    const timeStr = current.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    slots.push(timeStr);
+    current.setMinutes(current.getMinutes() + intervalMinutes);
+  }
+
+  return slots;
+};
 
 // Utility functions with timezone fixes
 const getWeekDays = (currentDate: Date) => {
@@ -131,20 +165,25 @@ const getAppointmentsForDay = (appointments: Appointment[], date: Date) => {
       aptDate.getMonth() === date.getMonth() &&
       aptDate.getDate() === date.getDate();
 
-    // Debug logging
-    if (isSameDay) {
-      console.log("📅 Found appointment for day:", {
-        targetDate: date.toDateString(),
-        appointmentDate: aptDate.toDateString(),
-        appointmentTime: aptDate.toLocaleTimeString(),
-        appointmentId: apt.id,
-      });
-    }
-
     return isSameDay;
   });
 
   return dayAppointments;
+};
+
+// NEW: Check if doctor is available on a specific day
+const isDoctorAvailableOnDay = (
+  doctorSchedule: DoctorSchedule | null,
+  date: Date
+): boolean => {
+  if (!doctorSchedule) {
+    // Fallback: available on weekdays
+    const dayOfWeek = date.getDay();
+    return dayOfWeek !== 0 && dayOfWeek !== 6;
+  }
+
+  const dayOfWeek = getDayOfWeekFromDate(date);
+  return doctorSchedule.schedule[dayOfWeek].isAvailable;
 };
 
 // Appointment component
@@ -207,14 +246,14 @@ const AppointmentCard: React.FC<{
   );
 };
 
-// Time slot component
+// Time slot component with schedule awareness
 const TimeSlot: React.FC<{
   date: Date;
   time: string;
   appointment?: Appointment;
   patient?: Patient;
   canCreate: boolean;
-  isWeekend?: boolean;
+  isUnavailable?: boolean; // NEW: Based on doctor schedule
   onTimeSlotClick: (date: Date, time: string) => void;
   onAppointmentClick: (appointment: Appointment) => void;
 }> = ({
@@ -223,7 +262,7 @@ const TimeSlot: React.FC<{
   appointment,
   patient,
   canCreate,
-  isWeekend,
+  isUnavailable,
   onTimeSlotClick,
   onAppointmentClick,
 }) => {
@@ -238,10 +277,10 @@ const TimeSlot: React.FC<{
     );
   }
 
-  if (isWeekend) {
+  if (isUnavailable) {
     return (
-      <div className="w-full h-full flex items-center justify-center text-gray-400">
-        <span className="text-xs">Fin de semana</span>
+      <div className="w-full h-full flex items-center justify-center text-gray-400 bg-gray-100">
+        <span className="text-xs">No disponible</span>
       </div>
     );
   }
@@ -263,16 +302,45 @@ const TimeSlot: React.FC<{
   ) : null;
 };
 
-// Month View
+// Hook to load doctor schedule
+const useDoctorSchedule = (doctorId: string) => {
+  const [schedule, setSchedule] = useState<DoctorSchedule | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const loadSchedule = async () => {
+      if (!doctorId) return;
+
+      try {
+        setLoading(true);
+        const doctorSchedule = await getDoctorSchedule(doctorId);
+        setSchedule(doctorSchedule);
+      } catch (error) {
+        console.error("Error loading doctor schedule:", error);
+        setSchedule(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadSchedule();
+  }, [doctorId]);
+
+  return { schedule, loading };
+};
+
+// Month View with schedule integration
 const MonthView: React.FC<CalendarViewsProps> = ({
   currentDate,
   appointments,
   patients,
+  selectedDoctor,
   onTimeSlotClick,
   onAppointmentClick,
   canCreateAppointments,
 }) => {
   const monthDays = useMemo(() => getMonthDays(currentDate), [currentDate]);
+  const { schedule: doctorSchedule } = useDoctorSchedule(selectedDoctor);
 
   return (
     <Card>
@@ -280,6 +348,11 @@ const MonthView: React.FC<CalendarViewsProps> = ({
         <CardTitle className="text-base flex items-center">
           <Calendar1 className="mr-2 h-4 w-4" />
           Vista Mensual
+          {doctorSchedule && (
+            <Badge variant="outline" className="ml-2 text-xs">
+              Horario personalizado activo
+            </Badge>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
@@ -298,7 +371,7 @@ const MonthView: React.FC<CalendarViewsProps> = ({
             const isCurrentMonth = date.getMonth() === currentDate.getMonth();
             const isToday = date.toDateString() === new Date().toDateString();
             const dayAppointments = getAppointmentsForDay(appointments, date);
-            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+            const isAvailable = isDoctorAvailableOnDay(doctorSchedule, date);
 
             return (
               <div
@@ -308,16 +381,16 @@ const MonthView: React.FC<CalendarViewsProps> = ({
                     ? "bg-gray-50 text-gray-400"
                     : isToday
                     ? "bg-blue-50"
-                    : isWeekend
+                    : !isAvailable
                     ? "bg-gray-100"
                     : "bg-white hover:bg-gray-50"
                 } ${
-                  canCreateAppointments && isCurrentMonth && !isWeekend
+                  canCreateAppointments && isCurrentMonth && isAvailable
                     ? "cursor-pointer"
                     : ""
                 }`}
                 onClick={() => {
-                  if (canCreateAppointments && isCurrentMonth && !isWeekend) {
+                  if (canCreateAppointments && isCurrentMonth && isAvailable) {
                     onTimeSlotClick(date, "09:00");
                   }
                 }}
@@ -329,6 +402,13 @@ const MonthView: React.FC<CalendarViewsProps> = ({
                 >
                   {date.getDate()}
                 </div>
+
+                {!isAvailable && isCurrentMonth && (
+                  <div className="text-xs text-gray-500 mb-1">
+                    No disponible
+                  </div>
+                )}
+
                 <div className="space-y-1">
                   {dayAppointments.slice(0, 2).map((appointment) => {
                     const patient = patients.find(
@@ -362,11 +442,12 @@ const MonthView: React.FC<CalendarViewsProps> = ({
   );
 };
 
-// Week View with optional detailed slots
+// Week View with schedule integration
 const WeekView: React.FC<CalendarViewProps> = ({
   currentDate,
   appointments,
   patients,
+  selectedDoctor,
   onTimeSlotClick,
   onAppointmentClick,
   canCreateAppointments,
@@ -374,7 +455,40 @@ const WeekView: React.FC<CalendarViewProps> = ({
   onToggleDetailedSlots,
 }) => {
   const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
-  const timeSlots = showDetailedSlots ? TIME_SLOTS_DETAILED : TIME_SLOTS;
+  const { schedule: doctorSchedule } = useDoctorSchedule(selectedDoctor);
+
+  // Generate time slots based on doctor's schedule
+  const timeSlots = useMemo(() => {
+    if (!doctorSchedule) {
+      return showDetailedSlots
+        ? TIME_SLOTS_DETAILED_DEFAULT
+        : TIME_SLOTS_DEFAULT;
+    }
+
+    // Find the earliest start and latest end times across all available days
+    const availableDays = Object.values(doctorSchedule.schedule).filter(
+      (day) => day.isAvailable
+    );
+
+    if (availableDays.length === 0) {
+      return []; // No available days
+    }
+
+    const earliestStart = availableDays.reduce(
+      (earliest, day) => (day.startTime < earliest ? day.startTime : earliest),
+      availableDays[0].startTime
+    );
+    const latestEnd = availableDays.reduce(
+      (latest, day) => (day.endTime > latest ? day.endTime : latest),
+      availableDays[0].endTime
+    );
+
+    return generateTimeSlotsForDay(
+      earliestStart,
+      latestEnd,
+      showDetailedSlots ? 30 : 60
+    );
+  }, [doctorSchedule, showDetailedSlots]);
 
   return (
     <Card>
@@ -383,6 +497,11 @@ const WeekView: React.FC<CalendarViewProps> = ({
           <CardTitle className="text-base flex items-center">
             <Calendar1 className="mr-2 h-4 w-4" />
             Vista Semanal
+            {doctorSchedule && (
+              <Badge variant="outline" className="ml-2 text-xs">
+                Horario personalizado
+              </Badge>
+            )}
           </CardTitle>
           {/* Optional toggle for detailed view */}
           {onToggleDetailedSlots && (
@@ -412,13 +531,14 @@ const WeekView: React.FC<CalendarViewProps> = ({
                   appointments,
                   day
                 );
+                const isAvailable = isDoctorAvailableOnDay(doctorSchedule, day);
 
                 return (
                   <div
                     key={index}
                     className={`p-2 border-r text-center ${
                       isToday ? "bg-blue-50" : "bg-gray-50"
-                    }`}
+                    } ${!isAvailable ? "opacity-50" : ""}`}
                   >
                     <div className="text-sm font-medium">
                       {day.toLocaleDateString("es-MX", { weekday: "short" })}
@@ -430,11 +550,13 @@ const WeekView: React.FC<CalendarViewProps> = ({
                     >
                       {day.getDate()}
                     </div>
-                    {dayAppointments.length > 0 && (
+                    {!isAvailable ? (
+                      <div className="text-xs text-red-600">No disponible</div>
+                    ) : dayAppointments.length > 0 ? (
                       <div className="text-xs text-gray-600">
                         {dayAppointments.length}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 );
               })}
@@ -453,7 +575,21 @@ const WeekView: React.FC<CalendarViewProps> = ({
                     {time}
                   </div>
                   {weekDays.map((day, dayIndex) => {
-                    // For hourly slots, we need to check if ANY appointment falls within this hour
+                    // Check if this time slot is within the doctor's schedule for this day
+                    let isTimeSlotAvailable = true;
+                    if (doctorSchedule) {
+                      const dayOfWeek = getDayOfWeekFromDate(day);
+                      const daySchedule = doctorSchedule.schedule[dayOfWeek];
+
+                      if (!daySchedule.isAvailable) {
+                        isTimeSlotAvailable = false;
+                      } else {
+                        isTimeSlotAvailable =
+                          time >= daySchedule.startTime &&
+                          time < daySchedule.endTime;
+                      }
+                    }
+
                     const appointment = showDetailedSlots
                       ? getAppointmentForSlot(appointments, day, time)
                       : getAppointmentForHourSlot(appointments, day, time);
@@ -461,14 +597,13 @@ const WeekView: React.FC<CalendarViewProps> = ({
                     const patient = appointment
                       ? patients.find((p) => p.id === appointment.patientId)
                       : undefined;
-                    const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 
                     return (
                       <div
                         key={dayIndex}
                         className={`p-1 border-r ${
                           showDetailedSlots ? "min-h-[50px]" : "min-h-[80px]"
-                        } ${isWeekend ? "bg-gray-100" : ""}`}
+                        } ${!isTimeSlotAvailable ? "bg-gray-100" : ""}`}
                       >
                         <TimeSlot
                           date={day}
@@ -476,7 +611,7 @@ const WeekView: React.FC<CalendarViewProps> = ({
                           appointment={appointment}
                           patient={patient}
                           canCreate={canCreateAppointments}
-                          isWeekend={isWeekend}
+                          isUnavailable={!isTimeSlotAvailable}
                           onTimeSlotClick={onTimeSlotClick}
                           onAppointmentClick={onAppointmentClick}
                         />
@@ -493,18 +628,43 @@ const WeekView: React.FC<CalendarViewProps> = ({
   );
 };
 
-// Day View with optional detailed slots
+// Day View with schedule integration
 const DayView: React.FC<CalendarViewProps> = ({
   currentDate,
   appointments,
   patients,
+  selectedDoctor,
   onTimeSlotClick,
   onAppointmentClick,
   canCreateAppointments,
   showDetailedSlots = false,
   onToggleDetailedSlots,
 }) => {
-  const timeSlots = showDetailedSlots ? TIME_SLOTS_DETAILED : TIME_SLOTS;
+  const { schedule: doctorSchedule } = useDoctorSchedule(selectedDoctor);
+
+  // Generate time slots based on doctor's schedule for this specific day
+  const timeSlots = useMemo(() => {
+    if (!doctorSchedule) {
+      return showDetailedSlots
+        ? TIME_SLOTS_DETAILED_DEFAULT
+        : TIME_SLOTS_DEFAULT;
+    }
+
+    const dayOfWeek = getDayOfWeekFromDate(currentDate);
+    const daySchedule = doctorSchedule.schedule[dayOfWeek];
+
+    if (!daySchedule.isAvailable) {
+      return []; // No slots if doctor not available
+    }
+
+    return generateTimeSlotsForDay(
+      daySchedule.startTime,
+      daySchedule.endTime,
+      showDetailedSlots ? 30 : 60
+    );
+  }, [doctorSchedule, currentDate, showDetailedSlots]);
+
+  const isAvailable = isDoctorAvailableOnDay(doctorSchedule, currentDate);
 
   return (
     <Card>
@@ -517,8 +677,22 @@ const DayView: React.FC<CalendarViewProps> = ({
               day: "numeric",
               month: "long",
             })}
+            {!isAvailable && (
+              <Badge variant="destructive" className="ml-2 text-xs">
+                Doctor no disponible
+              </Badge>
+            )}
+            {isAvailable && doctorSchedule && (
+              <Badge variant="outline" className="ml-2 text-xs">
+                {(() => {
+                  const dayOfWeek = getDayOfWeekFromDate(currentDate);
+                  const daySchedule = doctorSchedule.schedule[dayOfWeek];
+                  return `${daySchedule.startTime} - ${daySchedule.endTime}`;
+                })()}
+              </Badge>
+            )}
           </CardTitle>
-          {onToggleDetailedSlots && (
+          {onToggleDetailedSlots && isAvailable && (
             <Button
               variant="outline"
               size="sm"
@@ -531,40 +705,50 @@ const DayView: React.FC<CalendarViewProps> = ({
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="max-h-[500px] overflow-y-auto">
-          {timeSlots.map((time) => {
-            const appointment = showDetailedSlots
-              ? getAppointmentForSlot(appointments, currentDate, time)
-              : getAppointmentForHourSlot(appointments, currentDate, time);
+        {!isAvailable ? (
+          <div className="p-8 text-center text-gray-500">
+            <Clock className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+            <p className="text-lg font-medium mb-2">Doctor no disponible</p>
+            <p className="text-sm">
+              El doctor no tiene horario configurado para este día
+            </p>
+          </div>
+        ) : (
+          <div className="max-h-[500px] overflow-y-auto">
+            {timeSlots.map((time) => {
+              const appointment = showDetailedSlots
+                ? getAppointmentForSlot(appointments, currentDate, time)
+                : getAppointmentForHourSlot(appointments, currentDate, time);
 
-            const patient = appointment
-              ? patients.find((p) => p.id === appointment.patientId)
-              : undefined;
+              const patient = appointment
+                ? patients.find((p) => p.id === appointment.patientId)
+                : undefined;
 
-            return (
-              <div key={time} className="flex border-b hover:bg-gray-50">
-                <div className="w-16 p-3 border-r bg-gray-50 text-center text-sm font-medium">
-                  {time}
+              return (
+                <div key={time} className="flex border-b hover:bg-gray-50">
+                  <div className="w-16 p-3 border-r bg-gray-50 text-center text-sm font-medium">
+                    {time}
+                  </div>
+                  <div
+                    className={`flex-1 p-2 ${
+                      showDetailedSlots ? "min-h-[60px]" : "min-h-[80px]"
+                    }`}
+                  >
+                    <TimeSlot
+                      date={currentDate}
+                      time={time}
+                      appointment={appointment}
+                      patient={patient}
+                      canCreate={canCreateAppointments}
+                      onTimeSlotClick={onTimeSlotClick}
+                      onAppointmentClick={onAppointmentClick}
+                    />
+                  </div>
                 </div>
-                <div
-                  className={`flex-1 p-2 ${
-                    showDetailedSlots ? "min-h-[60px]" : "min-h-[80px]"
-                  }`}
-                >
-                  <TimeSlot
-                    date={currentDate}
-                    time={time}
-                    appointment={appointment}
-                    patient={patient}
-                    canCreate={canCreateAppointments}
-                    onTimeSlotClick={onTimeSlotClick}
-                    onAppointmentClick={onAppointmentClick}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -596,7 +780,7 @@ export const CalendarViews: React.FC<CalendarViewsProps> = (props) => {
   );
 };
 
-// Calendar Stats Component
+// Calendar Stats Component (unchanged but exported for completeness)
 interface CalendarStatsProps {
   appointments: Appointment[];
   currentDate: Date;
