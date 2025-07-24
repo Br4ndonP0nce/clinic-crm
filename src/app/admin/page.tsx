@@ -6,6 +6,8 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { PermissionGate } from "@/components/auth/PermissionGate";
 import { useAuth } from "@/hooks/useAuth";
 import { usePermissions } from "@/hooks/usePermissions";
+import FeatureAnnouncementModal from "@/components/ui/admin/FeatureAnnouncementModal";
+import { useFeatureAnnouncements } from "@/hooks/useFeatureAnnouncements";
 import {
   getPatients,
   getAppointments,
@@ -32,6 +34,8 @@ import {
   MoreHorizontal,
   Eye,
   EyeOff,
+  Bell,
+  Sparkles,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -120,7 +124,8 @@ export default function DentalDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [showDetailedStats, setShowDetailedStats] = useState(false);
   const [compactView, setCompactView] = useState(false);
-
+  const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
+  const { hasUnviewed, count } = useFeatureAnnouncements(role);
   // Memoized calculations
   const stats: DashboardStats = useMemo(() => {
     const patientsByStatus = (
@@ -142,7 +147,12 @@ export default function DentalDashboard() {
       recentAppointments: todaysAppointments.slice(0, 3),
     };
   }, [patients, todaysAppointments]);
-
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowAnnouncementModal(true);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
   // Data fetching
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -287,6 +297,12 @@ export default function DentalDashboard() {
               {userProfile?.displayName || userProfile?.email}
             </p>
           </div>
+          {showAnnouncementModal && (
+            <FeatureAnnouncementModal
+              userRole={role}
+              onClose={() => setShowAnnouncementModal(false)}
+            />
+          )}
 
           <div className="flex items-center space-x-2">
             {/* View Toggle */}

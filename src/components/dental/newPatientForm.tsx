@@ -20,11 +20,6 @@ import {
   Shield,
   AlertTriangle,
   CheckCircle,
-  Calendar,
-  Phone,
-  Mail,
-  CreditCard,
-  FileText,
   Bone,
   Plus,
   X,
@@ -35,13 +30,13 @@ interface NewPatientFormData {
   // Basic Information
   firstName: string;
   lastName: string;
-  email: string;
+  email: string; // Now optional
   phone: string;
   alternatePhone: string;
   dateOfBirth: string;
   gender: "male" | "female" | "other" | "prefer_not_to_say";
 
-  // Address
+  // Address (now optional)
   street: string;
   city: string;
   state: string;
@@ -79,17 +74,6 @@ interface NewPatientFormData {
   flossingFrequency: "daily" | "few_times_week" | "weekly" | "rarely" | "never";
   currentProblems: string[];
   painLevel: number;
-
-  // Preferences
-  preferredTimeSlots: string[];
-  preferredDays: string[];
-  communicationMethod: "email" | "phone" | "text" | "app";
-  reminderEmail: boolean;
-  reminderSms: boolean;
-  reminderDays: number;
-
-  // Financial
-  paymentMethod: "insurance" | "cash" | "card" | "payment_plan";
 
   // Consents
   treatmentConsent: boolean;
@@ -137,27 +121,19 @@ const initialFormData: NewPatientFormData = {
   flossingFrequency: "daily",
   currentProblems: [],
   painLevel: 0,
-  preferredTimeSlots: [],
-  preferredDays: [],
-  communicationMethod: "email",
-  reminderEmail: true,
-  reminderSms: false,
-  reminderDays: 1,
-  paymentMethod: "insurance",
   treatmentConsent: false,
   privacyPolicy: false,
   marketingEmails: false,
   notes: "",
 };
 
+// Updated FORM_STEPS without preferences and financial tabs
 const FORM_STEPS = [
   { id: "basic", title: "Información Básica", icon: User },
   { id: "address", title: "Dirección y Contacto", icon: MapPin },
   { id: "medical", title: "Historial Médico", icon: Heart },
   { id: "dental", title: "Historial Dental", icon: Stethoscope },
   { id: "odontogram", title: "Odontograma", icon: Bone },
-  { id: "preferences", title: "Preferencias", icon: Calendar },
-  { id: "financial", title: "Información Financiera", icon: CreditCard },
   { id: "consents", title: "Consentimientos", icon: Shield },
   { id: "review", title: "Revisión Final", icon: CheckCircle },
 ];
@@ -228,18 +204,16 @@ export default function NewPatientForm() {
           newErrors.firstName = "Nombre es requerido";
         if (!formData.lastName.trim())
           newErrors.lastName = "Apellido es requerido";
-        if (!formData.email.trim()) newErrors.email = "Email es requerido";
-        else if (!/\S+@\S+\.\S+/.test(formData.email))
+        // Email is now optional - only validate format if provided
+        if (formData.email.trim() && !/\S+@\S+\.\S+/.test(formData.email))
           newErrors.email = "Email inválido";
         if (!formData.phone.trim()) newErrors.phone = "Teléfono es requerido";
         if (!formData.dateOfBirth)
           newErrors.dateOfBirth = "Fecha de nacimiento es requerida";
         break;
-      case 1: // Address
-        if (!formData.street.trim())
-          newErrors.street = "Dirección es requerida";
-        if (!formData.city.trim()) newErrors.city = "Ciudad es requerida";
-        if (!formData.state.trim()) newErrors.state = "Estado es requerido";
+      case 1: // Address and Emergency Contact
+        // Address is now optional - no required validation for street, city, state
+        // Only emergency contact is required
         if (!formData.emergencyName.trim())
           newErrors.emergencyName = "Contacto de emergencia es requerido";
         if (!formData.emergencyPhone.trim())
@@ -257,15 +231,7 @@ export default function NewPatientForm() {
       case 4: // Odontogram - Optional
         // Odontogram is optional for initial intake
         break;
-
-      case 5: // Preferences - No required fields
-        // All preferences are optional
-        break;
-
-      case 6: // Financial Information - No required fields
-        // Payment method selection is optional
-        break;
-      case 7: // Consents
+      case 5: // Consents (previously step 7)
         if (!formData.treatmentConsent)
           newErrors.treatmentConsent =
             "Debe aceptar el consentimiento de tratamiento";
@@ -300,7 +266,7 @@ export default function NewPatientForm() {
       > = {
         firstName: formData.firstName,
         lastName: formData.lastName,
-        email: formData.email,
+        email: formData.email || "", // Default to empty string if not provided
         phone: formData.phone,
         // Only include alternatePhone if it has a value
         ...(formData.alternatePhone && {
@@ -310,11 +276,11 @@ export default function NewPatientForm() {
         gender: formData.gender,
 
         address: {
-          street: formData.street,
-          city: formData.city,
-          state: formData.state,
-          zipCode: formData.zipCode,
-          country: formData.country,
+          street: formData.street || "", // Default to empty string if not provided
+          city: formData.city || "",
+          state: formData.state || "",
+          zipCode: formData.zipCode || "",
+          country: formData.country || "México",
         },
 
         emergencyContact: {
@@ -373,19 +339,21 @@ export default function NewPatientForm() {
 
         status: "inquiry",
 
+        // Set default preferences since we removed the preferences tab
         preferences: {
-          preferredTimeSlots: formData.preferredTimeSlots,
-          preferredDays: formData.preferredDays,
-          communicationMethod: formData.communicationMethod,
+          preferredTimeSlots: [],
+          preferredDays: [],
+          communicationMethod: "email",
           reminderPreferences: {
-            email: formData.reminderEmail,
-            sms: formData.reminderSms,
-            days: formData.reminderDays,
+            email: true,
+            sms: false,
+            days: 1,
           },
         },
 
+        // Set default financial info since we removed the financial tab
         financial: {
-          paymentMethod: formData.paymentMethod,
+          paymentMethod: "insurance",
           balance: 0,
         },
 
@@ -466,18 +434,19 @@ export default function NewPatientForm() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="email">Correo Electrónico *</Label>
+                <Label htmlFor="email">Correo Electrónico</Label>
                 <Input
                   id="email"
                   type="email"
                   value={formData.email}
                   onChange={(e) => updateFormData("email", e.target.value)}
-                  placeholder="juan.perez@email.com"
+                  placeholder="juan.perez@email.com (opcional)"
                   className={errors.email ? "border-red-500" : ""}
                 />
                 {errors.email && (
                   <p className="text-red-500 text-sm mt-1">{errors.email}</p>
                 )}
+                <p className="text-xs text-gray-500 mt-1">Opcional</p>
               </div>
 
               <div>
@@ -562,50 +531,42 @@ export default function NewPatientForm() {
                 <MapPin className="h-5 w-5 mr-2" />
                 Dirección
               </h3>
+              <div className="bg-blue-50 p-3 rounded-lg mb-4">
+                <p className="text-sm text-blue-800">
+                  La información de dirección es opcional. Puede completarla
+                  ahora o después.
+                </p>
+              </div>
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="street">Dirección *</Label>
+                  <Label htmlFor="street">Dirección</Label>
                   <Input
                     id="street"
                     value={formData.street}
                     onChange={(e) => updateFormData("street", e.target.value)}
-                    placeholder="Calle Nombre #123, Colonia"
-                    className={errors.street ? "border-red-500" : ""}
+                    placeholder="Calle Nombre #123, Colonia (opcional)"
                   />
-                  {errors.street && (
-                    <p className="text-red-500 text-sm mt-1">{errors.street}</p>
-                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <Label htmlFor="city">Ciudad *</Label>
+                    <Label htmlFor="city">Ciudad</Label>
                     <Input
                       id="city"
                       value={formData.city}
                       onChange={(e) => updateFormData("city", e.target.value)}
-                      placeholder="Guadalajara"
-                      className={errors.city ? "border-red-500" : ""}
+                      placeholder="Guadalajara (opcional)"
                     />
-                    {errors.city && (
-                      <p className="text-red-500 text-sm mt-1">{errors.city}</p>
-                    )}
                   </div>
 
                   <div>
-                    <Label htmlFor="state">Estado *</Label>
+                    <Label htmlFor="state">Estado</Label>
                     <Input
                       id="state"
                       value={formData.state}
                       onChange={(e) => updateFormData("state", e.target.value)}
-                      placeholder="Jalisco"
-                      className={errors.state ? "border-red-500" : ""}
+                      placeholder="Jalisco (opcional)"
                     />
-                    {errors.state && (
-                      <p className="text-red-500 text-sm mt-1">
-                        {errors.state}
-                      </p>
-                    )}
                   </div>
 
                   <div>
@@ -1141,225 +1102,7 @@ export default function NewPatientForm() {
           </div>
         );
 
-      case 5: // Preferences
-        return (
-          <div className="space-y-6">
-            <h3 className="text-lg font-medium mb-4 flex items-center">
-              <Calendar className="h-5 w-5 mr-2" />
-              Preferencias de Citas
-            </h3>
-
-            <div>
-              <Label>Horarios Preferidos</Label>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-                {["morning", "afternoon", "evening", "weekend"].map((slot) => (
-                  <button
-                    key={slot}
-                    type="button"
-                    onClick={() => {
-                      const current = formData.preferredTimeSlots;
-                      if (current.includes(slot)) {
-                        updateFormData(
-                          "preferredTimeSlots",
-                          current.filter((s) => s !== slot)
-                        );
-                      } else {
-                        updateFormData("preferredTimeSlots", [
-                          ...current,
-                          slot,
-                        ]);
-                      }
-                    }}
-                    className={`p-2 border rounded-lg text-sm ${
-                      formData.preferredTimeSlots.includes(slot)
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    {slot === "morning" && "Mañana"}
-                    {slot === "afternoon" && "Tarde"}
-                    {slot === "evening" && "Noche"}
-                    {slot === "weekend" && "Fin de semana"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <Label>Días Preferidos</Label>
-              <div className="grid grid-cols-4 md:grid-cols-7 gap-2 mt-2">
-                {[
-                  "monday",
-                  "tuesday",
-                  "wednesday",
-                  "thursday",
-                  "friday",
-                  "saturday",
-                  "sunday",
-                ].map((day) => (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() => {
-                      const current = formData.preferredDays;
-                      if (current.includes(day)) {
-                        updateFormData(
-                          "preferredDays",
-                          current.filter((d) => d !== day)
-                        );
-                      } else {
-                        updateFormData("preferredDays", [...current, day]);
-                      }
-                    }}
-                    className={`p-2 border rounded-lg text-sm ${
-                      formData.preferredDays.includes(day)
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    {day === "monday" && "Lun"}
-                    {day === "tuesday" && "Mar"}
-                    {day === "wednesday" && "Mié"}
-                    {day === "thursday" && "Jue"}
-                    {day === "friday" && "Vie"}
-                    {day === "saturday" && "Sáb"}
-                    {day === "sunday" && "Dom"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <Label>Método de Comunicación Preferido</Label>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-                {[
-                  { value: "email", label: "Email", icon: Mail },
-                  { value: "phone", label: "Teléfono", icon: Phone },
-                  { value: "text", label: "SMS", icon: Phone },
-                  { value: "app", label: "App", icon: CheckCircle },
-                ].map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() =>
-                      updateFormData("communicationMethod", option.value)
-                    }
-                    className={`p-3 border rounded-lg text-sm flex flex-col items-center ${
-                      formData.communicationMethod === option.value
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <option.icon className="h-5 w-5 mb-1" />
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <h4 className="font-medium mb-3">Recordatorios de Citas</h4>
-              <div className="space-y-3">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="reminderEmail"
-                    checked={formData.reminderEmail}
-                    onChange={(e) =>
-                      updateFormData("reminderEmail", e.target.checked)
-                    }
-                    className="rounded"
-                  />
-                  <Label htmlFor="reminderEmail">Recordatorios por email</Label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="reminderSmsPrefs"
-                    checked={formData.reminderSms}
-                    onChange={(e) =>
-                      updateFormData("reminderSms", e.target.checked)
-                    }
-                    className="rounded"
-                  />
-                  <Label htmlFor="reminderSmsPrefs">
-                    Recordatorios por SMS
-                  </Label>
-                </div>
-
-                <div>
-                  <Label htmlFor="reminderDaysPrefs">
-                    Días de anticipación para recordatorios
-                  </Label>
-                  <select
-                    id="reminderDaysPrefs"
-                    value={formData.reminderDays}
-                    onChange={(e) =>
-                      updateFormData("reminderDays", parseInt(e.target.value))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
-                  >
-                    <option value={1}>1 día antes</option>
-                    <option value={2}>2 días antes</option>
-                    <option value={3}>3 días antes</option>
-                    <option value={7}>1 semana antes</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      case 6: // Financial Information
-        return (
-          <div className="space-y-6">
-            <h3 className="text-lg font-medium mb-4 flex items-center">
-              <CreditCard className="h-5 w-5 mr-2" />
-              Información Financiera
-            </h3>
-
-            <div>
-              <Label>Método de Pago Preferido</Label>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-                {[
-                  { value: "insurance", label: "Seguro Médico" },
-                  { value: "cash", label: "Efectivo" },
-                  { value: "card", label: "Tarjeta" },
-                  { value: "payment_plan", label: "Plan de Pagos" },
-                ].map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() =>
-                      updateFormData("paymentMethod", option.value)
-                    }
-                    className={`p-3 border rounded-lg text-sm ${
-                      formData.paymentMethod === option.value
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <h4 className="font-medium text-blue-900 mb-2">
-                Información sobre Pagos
-              </h4>
-              <ul className="text-sm text-blue-800 space-y-1">
-                <li>• Aceptamos efectivo, tarjetas de débito y crédito</li>
-                <li>• Ofrecemos planes de pago para tratamientos extensos</li>
-                <li>• Trabajamos con los principales seguros médicos</li>
-                <li>• Cotizaciones sin costo para todos los tratamientos</li>
-              </ul>
-            </div>
-          </div>
-        );
-
-      case 7: // Consents
+      case 5: // Consents (previously step 7)
         return (
           <div className="space-y-6">
             <h3 className="text-lg font-medium mb-4 flex items-center">
@@ -1471,7 +1214,7 @@ export default function NewPatientForm() {
           </div>
         );
 
-      case 8: // Review
+      case 6: // Review (previously step 8)
         return (
           <div className="space-y-6">
             <h3 className="text-lg font-medium mb-4 flex items-center">
@@ -1499,7 +1242,8 @@ export default function NewPatientForm() {
                     {formData.lastName}
                   </div>
                   <div>
-                    <strong>Email:</strong> {formData.email}
+                    <strong>Email:</strong>{" "}
+                    {formData.email || "No proporcionado"}
                   </div>
                   <div>
                     <strong>Teléfono:</strong> {formData.phone}
@@ -1516,6 +1260,34 @@ export default function NewPatientForm() {
                       : formData.gender === "other"
                       ? "Otro"
                       : "Prefiere no decir"}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Address Summary */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Dirección</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div>
+                    <strong>Dirección:</strong>{" "}
+                    {formData.street || "No proporcionada"}
+                  </div>
+                  <div>
+                    <strong>Ciudad:</strong>{" "}
+                    {formData.city || "No proporcionada"}
+                  </div>
+                  <div>
+                    <strong>Estado:</strong>{" "}
+                    {formData.state || "No proporcionado"}
+                  </div>
+                  <div>
+                    <strong>Código Postal:</strong>{" "}
+                    {formData.zipCode || "No proporcionado"}
+                  </div>
+                  <div>
+                    <strong>País:</strong> {formData.country}
                   </div>
                 </CardContent>
               </Card>
@@ -1573,28 +1345,6 @@ export default function NewPatientForm() {
                     {formData.currentProblems.length > 0
                       ? formData.currentProblems.join(", ")
                       : "Ninguno"}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Preferences Summary */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Preferencias</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  <div>
-                    <strong>Método de contacto:</strong>{" "}
-                    {formData.communicationMethod}
-                  </div>
-                  <div>
-                    <strong>Método de pago:</strong> {formData.paymentMethod}
-                  </div>
-                  <div>
-                    <strong>Recordatorios:</strong>
-                    {formData.reminderEmail && " Email"}
-                    {formData.reminderSms && " SMS"}
-                    {` (${formData.reminderDays} días antes)`}
                   </div>
                 </CardContent>
               </Card>
