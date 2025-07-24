@@ -1,4 +1,4 @@
-// src/hooks/usePatientEditing.ts
+// src/hooks/usePatientEditing.ts - Fixed validation for alternatePhone
 import React, { useState, useCallback, useEffect } from 'react';
 import { Patient } from '@/lib/firebase/db';
 
@@ -15,7 +15,8 @@ type PatientSection =
   | 'physician'
   | 'dentalHistory' 
   | 'oralHygiene' 
-  | 'dentalProblems';
+  | 'dentalProblems'
+  | 'clinicalFindings'; // Added new section
 
 interface UsePatientEditingReturn {
   // State
@@ -139,29 +140,55 @@ export const usePatientEditing = (): UsePatientEditingReturn => {
     });
   }, []);
 
-  // Basic validation
+  // Enhanced validation with better alternatePhone handling
   const validateData = useCallback((section: PatientSection, data: Partial<Patient>): Record<string, string> => {
     const errors: Record<string, string> = {};
 
     switch (section) {
       case 'contact':
-        if (!data.firstName?.trim()) errors.firstName = 'First name is required';
-        if (!data.lastName?.trim()) errors.lastName = 'Last name is required';
-        if (!data.email?.trim()) errors.email = 'Email is required';
-        else if (!/\S+@\S+\.\S+/.test(data.email)) errors.email = 'Invalid email format';
-        if (!data.phone?.trim()) errors.phone = 'Phone number is required';
+        if (!data.firstName?.trim()) errors.firstName = 'Nombre es requerido';
+        if (!data.lastName?.trim()) errors.lastName = 'Apellido es requerido';
+        if (!data.email?.trim()) {
+          errors.email = 'Email es requerido';
+        } else if (!/\S+@\S+\.\S+/.test(data.email)) {
+          errors.email = 'Formato de email inválido';
+        }
+        if (!data.phone?.trim()) errors.phone = 'Teléfono es requerido';
+        // NOTE: alternatePhone is optional - no validation needed
         break;
         
       case 'address':
-        if (!data.address?.street?.trim()) errors.street = 'Street address is required';
-        if (!data.address?.city?.trim()) errors.city = 'City is required';
-        if (!data.address?.state?.trim()) errors.state = 'State is required';
-        if (!data.address?.zipCode?.trim()) errors.zipCode = 'ZIP code is required';
+        if (!data.address?.street?.trim()) errors.street = 'Dirección es requerida';
+        if (!data.address?.city?.trim()) errors.city = 'Ciudad es requerida';
+        if (!data.address?.state?.trim()) errors.state = 'Estado es requerido';
+        if (!data.address?.zipCode?.trim()) errors.zipCode = 'Código postal es requerido';
         break;
         
       case 'emergency':
-        if (!data.emergencyContact?.name?.trim()) errors.emergencyName = 'Emergency contact name is required';
-        if (!data.emergencyContact?.phone?.trim()) errors.emergencyPhone = 'Emergency contact phone is required';
+        if (!data.emergencyContact?.name?.trim()) errors.emergencyName = 'Nombre del contacto de emergencia es requerido';
+        if (!data.emergencyContact?.phone?.trim()) errors.emergencyPhone = 'Teléfono del contacto de emergencia es requerido';
+        break;
+
+      case 'insurance':
+        if (data.insurance?.isActive) {
+          if (!data.insurance?.provider?.trim()) errors.insuranceProvider = 'Proveedor de seguro es requerido';
+          if (!data.insurance?.policyNumber?.trim()) errors.policyNumber = 'Número de póliza es requerido';
+        }
+        break;
+
+      case 'allergies':
+      case 'medications':
+      case 'conditions':
+      case 'surgeries':
+      case 'dentalProblems':
+      case 'clinicalFindings':
+        // Array-based fields don't need specific validation beyond non-empty values
+        break;
+
+      case 'dentalHistory':
+        if (!data.dentalHistory?.reasonForVisit?.trim()) {
+          errors.reasonForVisit = 'Motivo de la visita es requerido';
+        }
         break;
     }
 
