@@ -41,6 +41,7 @@ import {
   CreditCard,
   ChevronLeft,
   ChevronRight,
+  Clock,
 } from "lucide-react";
 
 interface NavigationItem {
@@ -73,6 +74,13 @@ const DENTAL_NAVIGATION: NavigationItem[] = [
     icon: Calendar,
     permission: "calendar:read",
     description: "Programación de citas",
+  },
+  {
+    href: "/admin/schedule-settings", // NEW
+    icon: Clock,
+    label: "Horarios",
+    permission: "schedule:write",
+    description: "Configuración Horarios",
   },
   {
     href: "/admin/treatments",

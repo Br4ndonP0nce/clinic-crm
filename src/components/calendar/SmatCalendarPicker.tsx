@@ -1,7 +1,7 @@
-// src/components/calendar/SmartCalendarPicker.tsx
+// src/components/calendar/SmartCalendarPicker.tsx - COMPLETE UPDATED VERSION
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,6 @@ import {
   X,
   AlertCircle,
   CheckCircle,
-  Bug,
 } from "lucide-react";
 
 import { Appointment, Patient } from "@/lib/firebase/db";
@@ -29,7 +28,13 @@ import {
   createLocalDateTime,
 } from "@/lib/utils/datetime";
 
-import { ConflictDebugger } from "./ConflictDebugger";
+// NEW: Import schedule functions
+import {
+  getDoctorSchedule,
+  isDoctorAvailable,
+  getDayOfWeekFromDate,
+  DoctorSchedule,
+} from "@/lib/firebase/doctor-schedule";
 
 interface SmartCalendarPickerProps {
   isOpen: boolean;
@@ -50,15 +55,33 @@ interface TimeSlot {
     type: string;
     duration: number;
   };
+  outsideSchedule?: boolean; // NEW: Track if slot is outside doctor's schedule
 }
 
-const TIME_SLOTS = Array.from({ length: 20 }, (_, i) => {
-  const hour = Math.floor(8 + i / 2);
-  const minute = (i % 2) * 30;
-  return `${hour.toString().padStart(2, "0")}:${minute
-    .toString()
-    .padStart(2, "0")}`;
-});
+// Generate time slots based on doctor's schedule
+const generateTimeSlotsForDay = (
+  startTime: string,
+  endTime: string,
+  intervalMinutes: number = 30
+): string[] => {
+  const slots: string[] = [];
+
+  const start = new Date(`2000-01-01T${startTime}:00`);
+  const end = new Date(`2000-01-01T${endTime}:00`);
+
+  let current = new Date(start);
+
+  while (current < end) {
+    const timeStr = current.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    slots.push(timeStr);
+    current.setMinutes(current.getMinutes() + intervalMinutes);
+  }
+
+  return slots;
+};
 
 const APPOINTMENT_TYPE_COLORS = {
   consultation: "bg-blue-500",
@@ -80,7 +103,33 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
 }) => {
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
-  const [showDebugger, setShowDebugger] = useState(false); // Debug mode toggle
+
+  // NEW: Doctor schedule state
+  const [doctorSchedule, setDoctorSchedule] = useState<DoctorSchedule | null>(
+    null
+  );
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+
+  // Load doctor schedule when doctor changes
+  useEffect(() => {
+    const loadDoctorSchedule = async () => {
+      if (!selectedDoctor) return;
+
+      try {
+        setScheduleLoading(true);
+        const schedule = await getDoctorSchedule(selectedDoctor);
+        setDoctorSchedule(schedule);
+      } catch (error) {
+        console.error("Error loading doctor schedule:", error);
+        // Fallback to default behavior if schedule loading fails
+        setDoctorSchedule(null);
+      } finally {
+        setScheduleLoading(false);
+      }
+    };
+
+    loadDoctorSchedule();
+  }, [selectedDoctor]);
 
   // Generate calendar days for the current month view
   const calendarDays = useMemo(() => {
@@ -102,6 +151,23 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
   // Check if a time slot conflicts with existing appointments
   const checkSlotAvailability = useCallback(
     (date: Date, time: string, duration: number): TimeSlot => {
+      // First check if the slot is within doctor's schedule
+      if (doctorSchedule) {
+        const available = isDoctorAvailable(
+          doctorSchedule,
+          date,
+          time,
+          duration
+        );
+        if (!available) {
+          return {
+            time,
+            available: false,
+            outsideSchedule: true,
+          };
+        }
+      }
+
       const slotStart = createLocalDateTime(formatDateForInput(date), time);
       const slotEnd = new Date(slotStart.getTime() + duration * 60000);
 
@@ -123,27 +189,6 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
 
         const hasConflict = overlaps && !isBackToBack;
 
-        // Enhanced debug logging
-        if (overlaps) {
-          console.log("🔍 Checking slot conflict:", {
-            newSlot: `${time} (${duration}min)`,
-            newSlotRange: `${slotStart.toLocaleTimeString()} - ${slotEnd.toLocaleTimeString()}`,
-            existingApt: `${aptStart.toLocaleTimeString()} - ${aptEnd.toLocaleTimeString()}`,
-            existingDuration: appointment.duration,
-            rawOverlap: overlaps,
-            isBackToBack: isBackToBack,
-            finalConflict: hasConflict,
-            timeComparison: {
-              slotStart: slotStart.getTime(),
-              slotEnd: slotEnd.getTime(),
-              aptStart: aptStart.getTime(),
-              aptEnd: aptEnd.getTime(),
-              slotEndEqualsAptStart: slotEnd.getTime() === aptStart.getTime(),
-              slotStartEqualsAptEnd: slotStart.getTime() === aptEnd.getTime(),
-            },
-          });
-        }
-
         return hasConflict;
       });
 
@@ -162,30 +207,55 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
 
       return { time, available: true };
     },
-    [appointments, patients]
+    [appointments, patients, doctorSchedule]
   );
 
   // Get available time slots for the selected date
   const availableTimeSlots = useMemo(() => {
-    if (!selectedDate) return [];
+    if (!selectedDate || scheduleLoading) return [];
 
-    // Skip weekends
-    const dayOfWeek = selectedDate.getDay();
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      return [];
-    }
-
-    // Skip past dates
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     if (selectedDate < today) {
       return [];
     }
 
-    return TIME_SLOTS.map((time) =>
+    // Generate time slots based on doctor's schedule or fallback to default
+    let timeSlots: string[] = [];
+
+    if (doctorSchedule) {
+      const dayOfWeek = getDayOfWeekFromDate(selectedDate);
+      const daySchedule = doctorSchedule.schedule[dayOfWeek];
+
+      if (!daySchedule.isAvailable) {
+        return []; // Doctor not available this day
+      }
+
+      timeSlots = generateTimeSlotsForDay(
+        daySchedule.startTime,
+        daySchedule.endTime,
+        30 // 30-minute intervals
+      );
+    } else {
+      // Fallback to default weekday schedule
+      const dayOfWeek = selectedDate.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        return []; // Weekend - no slots by default
+      }
+
+      timeSlots = generateTimeSlotsForDay("08:00", "17:00", 30);
+    }
+
+    return timeSlots.map((time) =>
       checkSlotAvailability(selectedDate, time, appointmentDuration)
     );
-  }, [selectedDate, appointmentDuration, checkSlotAvailability]);
+  }, [
+    selectedDate,
+    appointmentDuration,
+    checkSlotAvailability,
+    doctorSchedule,
+    scheduleLoading,
+  ]);
 
   // Get appointments for a specific day
   const getAppointmentsForDay = useCallback(
@@ -228,17 +298,45 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
   const isDateSelectable = (date: Date) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const dayOfWeek = date.getDay();
 
-    return date >= today && dayOfWeek !== 0 && dayOfWeek !== 6;
+    if (date < today) return false;
+
+    // Check doctor's schedule if available
+    if (doctorSchedule) {
+      const dayOfWeek = getDayOfWeekFromDate(date);
+      return doctorSchedule.schedule[dayOfWeek].isAvailable;
+    }
+
+    // Fallback: weekdays only
+    const dayOfWeek = date.getDay();
+    return dayOfWeek !== 0 && dayOfWeek !== 6;
   };
 
   const hasAvailableSlots = (date: Date) => {
     if (!isDateSelectable(date)) return false;
 
-    return TIME_SLOTS.some(
-      (time) => checkSlotAvailability(date, time, appointmentDuration).available
-    );
+    // Quick check based on doctor schedule
+    if (doctorSchedule) {
+      const dayOfWeek = getDayOfWeekFromDate(date);
+      const daySchedule = doctorSchedule.schedule[dayOfWeek];
+
+      if (!daySchedule.isAvailable) return false;
+
+      // Generate a few sample slots to check availability
+      const sampleSlots = generateTimeSlotsForDay(
+        daySchedule.startTime,
+        daySchedule.endTime,
+        60 // Check every hour
+      );
+
+      return sampleSlots.some(
+        (time) =>
+          checkSlotAvailability(date, time, appointmentDuration).available
+      );
+    }
+
+    // Fallback check
+    return true; // Assume availability if no schedule data
   };
 
   return (
@@ -255,6 +353,15 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
             </Button>
           </DialogTitle>
         </DialogHeader>
+
+        {scheduleLoading && (
+          <div className="flex items-center justify-center py-4">
+            <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-500 mr-2"></div>
+            <span className="text-sm text-gray-600">
+              Cargando horario del doctor...
+            </span>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Calendar Section */}
@@ -350,9 +457,6 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
                           {dayAppointments
                             .slice(0, 2)
                             .map((appointment, aptIndex) => {
-                              const patient = patients.find(
-                                (p) => p.id === appointment.patientId
-                              );
                               const typeColor =
                                 APPOINTMENT_TYPE_COLORS[
                                   appointment.type as keyof typeof APPOINTMENT_TYPE_COLORS
@@ -435,7 +539,11 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
                 ) : availableTimeSlots.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <AlertCircle className="h-12 w-12 mx-auto mb-4 text-red-300" />
-                    <p>No hay horarios disponibles este día</p>
+                    <p>
+                      {doctorSchedule
+                        ? "Doctor no disponible este día"
+                        : "No hay horarios disponibles este día"}
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2 max-h-[400px] overflow-y-auto">
@@ -469,6 +577,11 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
                       >
                         <div className="text-left w-full">
                           <div className="font-medium">{slot.time}</div>
+                          {!slot.available && slot.outsideSchedule && (
+                            <div className="text-xs text-orange-600 mt-1">
+                              Fuera del horario del doctor
+                            </div>
+                          )}
                           {!slot.available && slot.conflictingAppointment && (
                             <div className="text-xs text-red-600 mt-1">
                               Ocupado: {slot.conflictingAppointment.patient}
@@ -510,17 +623,6 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
 
             {/* Action buttons */}
             <div className="flex justify-between items-center pt-4">
-              {/*<Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowDebugger(!showDebugger)}
-                className="flex items-center text-xs"
-              >
-                <Bug className="mr-1 h-3 w-3" />
-                {showDebugger ? "Ocultar" : "Debug"}
-              </Button>*/}
-
               <div className="flex space-x-2">
                 <Button variant="outline" onClick={onClose}>
                   Cancelar
@@ -535,15 +637,6 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
                 </Button>
               </div>
             </div>
-
-            {/* Debug Component 
-            <ConflictDebugger
-              selectedDate={selectedDate}
-              selectedTime={selectedTime}
-              duration={appointmentDuration}
-              appointments={appointments}
-              isOpen={showDebugger}
-            />*/}
           </div>
         </div>
 
@@ -561,7 +654,7 @@ export const SmartCalendarPicker: React.FC<SmartCalendarPickerProps> = ({
             </div>
             <div className="flex items-center">
               <div className="w-3 h-3 bg-gray-100 border border-gray-300 rounded mr-2"></div>
-              <span>Fines de semana</span>
+              <span>Días no laborables</span>
             </div>
             <div className="flex items-center">
               <CheckCircle className="h-3 w-3 text-green-500 mr-2" />

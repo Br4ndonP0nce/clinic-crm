@@ -32,7 +32,25 @@ export const FEATURE_ANNOUNCEMENTS: FeatureAnnouncement[] = [
     priority: 'low',
     ctaText: 'Entendido!',
     ctaUrl: ''
-  }
+  },{
+  id: 'doctor-schedule-administration',
+  title: 'NUEVO: Sistema de Administración de Horarios',
+  description: 'Los doctores ahora pueden configurar sus propios horarios de disponibilidad, incluyendo fines de semana. El sistema incluye detección de conflictos y integración completa con el calendario para una gestión más flexible de citas.',
+  features: [
+    'Configuración personalizada de horarios por doctor',
+    'Disponibilidad en fines de semana configurable',
+    'Detección automática de conflictos con citas existentes',
+    'Integración completa con el calendario inteligente',
+    'Validación de horarios dentro de las horas de clínica (8AM-7PM)',
+    'Widget de resumen de horario en el dashboard',
+    'Permisos basados en roles (doctores editan su horario, admins todos)'
+  ],
+  version: '2.1.0',
+  date: '2025-07-24',
+  priority: 'high',
+  ctaText: '¡Configurar mi horario!',
+  ctaUrl: '/admin/schedule-settings'
+}
 ];
 
 // Storage key for tracking viewed announcements

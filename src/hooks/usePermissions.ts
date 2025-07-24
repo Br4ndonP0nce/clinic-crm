@@ -116,7 +116,25 @@ export const usePermissions = () => {
       'patients:read',
       'calendar:read'
     ]),
+     canViewSchedules: hasPermission('schedule:read'),
+    canEditSchedules: hasPermission('schedule:write'),
+    canEditOwnSchedule: userProfile?.role === 'doctor' || hasPermission('schedule:write'),
+    // Schedule contextual permissions
+   canEditDoctorSchedule: (doctorId?: string | null) => {
+      if (!doctorId) return false;
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'doctor' && doctorId === userProfile.uid) return true;
+      return hasPermission('schedule:write');
+    },
     
+    canViewDoctorSchedule: (doctorId?: string | null) => {
+      if (!doctorId) return false;
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'recepcion') return true;
+      if (userProfile?.role === 'ventas') return true;
+      if (userProfile?.role === 'doctor' && doctorId === userProfile.uid) return true;
+      return hasPermission('schedule:read');
+    },
     // 🆕 CONTEXTUAL PERMISSIONS - Based on resource ownership
     canEditAppointment: (appointmentDoctorId?: string) => {
       if (userProfile?.role === 'super_admin') return true;
@@ -206,6 +224,11 @@ export const usePermissions = () => {
       if (userProfile?.role === 'doctor' && resourceOwnerId === userProfile.uid) return true;
       return false;
     },
+     shouldShowScheduleEditButtons: (doctorId?: string) => {
+      if (userProfile?.role === 'super_admin') return true;
+      if (userProfile?.role === 'doctor' && doctorId === userProfile.uid) return true;
+      return hasPermission('schedule:write');
+    },
     
     shouldShowDeleteButtons: (resourceOwnerId?: string, resourceStatus?: string) => {
       if (userProfile?.role === 'super_admin') return true;
@@ -260,6 +283,13 @@ export const usePermissions = () => {
     calendarPermissions: {
       read: hasPermission('calendar:read'),
       write: hasPermission('calendar:write') || userProfile?.role === 'doctor',
+    },// 🆕 ADD TO YOUR PERMISSION GROUPS SECTION (where you have billingPermissions, etc.):
+
+    schedulePermissions: {
+      read: hasPermission('schedule:read'),
+      write: hasPermission('schedule:write'),
+      editOwn: userProfile?.role === 'doctor' || hasPermission('schedule:write'),
+      editAny: userProfile?.role === 'super_admin',
     },
 
     // 🆕 DATA FILTERING HELPERS

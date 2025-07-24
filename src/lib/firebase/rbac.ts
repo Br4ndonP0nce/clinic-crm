@@ -35,7 +35,9 @@ export type Permission =
   | 'settings:write'
   | 'staff:read'
   | 'staff:write'
-  | 'staff:delete';
+  | 'staff:delete'
+  | 'schedule:read'    // NEW: View schedules
+  | 'schedule:write';  // NEW: Modify schedules
 
 // Define roles for dental practice
 export type Role = 'super_admin' | 'doctor' | 'recepcion' | 'ventas';
@@ -63,7 +65,8 @@ export const SYSTEM_ROLES: Record<Role, RoleDefinition> = {
       'billing:read', 'billing:write',
       'ventas:read', 'ventas:write',
       'settings:read', 'settings:write',
-      'staff:read', 'staff:write', 'staff:delete'
+      'staff:read', 'staff:write', 'staff:delete',
+       'schedule:read', 'schedule:write'  // NEW
     ],
     isSystemRole: true
   },
@@ -77,7 +80,8 @@ export const SYSTEM_ROLES: Record<Role, RoleDefinition> = {
       'appointments:read', 'appointments:write',
       'treatments:read', 'treatments:write',
       'calendar:read', 'calendar:write',
-      'billing:read'
+      'billing:read',
+      'schedule:read', 'schedule:write'  // NEW: Doctors can manage their own schedule
     ],
     isSystemRole: true
   },
@@ -90,7 +94,8 @@ export const SYSTEM_ROLES: Record<Role, RoleDefinition> = {
       'patients:read', 'patients:write',
       'appointments:read', 'appointments:write',
       'calendar:read', 'calendar:write',
-      'billing:read', 'billing:write'
+      'billing:read', 'billing:write',
+       'schedule:read'  // NEW: Sales can view schedules for appointment booking
     ],
     isSystemRole: true
   },
@@ -103,7 +108,8 @@ export const SYSTEM_ROLES: Record<Role, RoleDefinition> = {
       'patients:read', 'patients:write',
       'appointments:read',
       'calendar:read',
-      'ventas:read', 'ventas:write'
+      'ventas:read', 'ventas:write',
+       'schedule:read'  // 🆕 NEW (can view but not edit)
     ],
     isSystemRole: true
   }
@@ -376,6 +382,9 @@ export const getAccessibleRoutes = (userProfile: UserProfile): string[] => {
   
   if (permissions.includes('staff:read')) {
     routes.push('/admin/staff');
+  }
+    if (permissions.includes('schedule:write')) {
+    routes.push('/admin/schedule-settings');
   }
   
   return routes;
