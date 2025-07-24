@@ -50,6 +50,25 @@ export const FEATURE_ANNOUNCEMENTS: FeatureAnnouncement[] = [
   priority: 'high',
   ctaText: '¡Configurar mi horario!',
   ctaUrl: '/admin/schedule-settings'
+  },
+  {
+ id: 'enhanced-patient-management-system',
+ title: 'NUEVO: Sistema Mejorado de Gestión de Pacientes',
+ description: 'Grandes mejoras al sistema de pacientes incluyendo edición completa del historial médico, creación de tratamientos desde el perfil del paciente, y nuevas secciones para hallazgos clínicos. También se corrigieron problemas de validación para mejorar la experiencia de usuario.',
+ features: [
+   'Edición completa de condiciones médicas del paciente',
+   'Edición completa de cirugías previas del paciente',
+   'Creación de tratamientos directamente desde el perfil del paciente',
+   'Nueva sección "Accidentes/Hallazgos Clínicos" editable',
+   'Corrección de validación: teléfono alternativo ahora es opcional',
+   'Interfaz mejorada con mejor feedback visual',
+   'Compatibilidad retroactiva con datos existentes'
+ ],
+ version: '2.1.1',
+ date: '2025-07-24',
+ priority: 'medium',
+ ctaText: 'Entendido',
+ ctaUrl: ''
 }
 ];
 
