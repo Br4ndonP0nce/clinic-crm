@@ -1,4 +1,4 @@
-// src/app/admin/patients/[id]/page.tsx - Updated with Smart Calendar Modal
+// src/app/admin/patients/[id]/page.tsx - Enhanced with all requested features
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -6,7 +6,11 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { usePatientData } from "@/hooks/usePatientData";
 import { usePatientEditing } from "@/hooks/usePatientEditing";
-import { addAppointment, getAppointments } from "@/lib/firebase/db";
+import {
+  addAppointment,
+  getAppointments,
+  addTreatmentRecord,
+} from "@/lib/firebase/db";
 import { Timestamp } from "firebase/firestore";
 
 // Component imports
@@ -24,6 +28,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   ArrowLeft,
   CalendarPlus,
@@ -36,6 +59,11 @@ import {
   Shield,
   AlertTriangle,
   Pill,
+  Plus,
+  X,
+  Edit,
+  Save,
+  XCircle,
 } from "lucide-react";
 
 // Import timezone utilities
@@ -49,8 +77,36 @@ export default function PatientDetailsPage() {
 
   // Modal states
   const [showNewAppointmentModal, setShowNewAppointmentModal] = useState(false);
+  const [showNewTreatmentModal, setShowNewTreatmentModal] = useState(false);
   const [allDoctorAppointments, setAllDoctorAppointments] = useState<any[]>([]);
   const [selectedDoctor, setSelectedDoctor] = useState<string>("");
+
+  // Treatment form state with proper typing
+  const [newTreatment, setNewTreatment] = useState<{
+    code: string;
+    description: string;
+    tooth: string[];
+    diagnosis: string;
+    notes: string;
+    cost: {
+      total: number;
+      insuranceCovered: number;
+      patientPortion: number;
+    };
+    status: "planned" | "in_progress" | "completed" | "cancelled";
+  }>({
+    code: "",
+    description: "",
+    tooth: [],
+    diagnosis: "",
+    notes: "",
+    cost: {
+      total: 0,
+      insuranceCovered: 0,
+      patientPortion: 0,
+    },
+    status: "planned",
+  });
 
   // Main data hook
   const {
@@ -85,7 +141,6 @@ export default function PatientDetailsPage() {
       if (!selectedDoctor) return;
 
       try {
-        // Load appointments for the next 3 months for conflict detection
         const today = new Date();
         const futureDate = new Date();
         futureDate.setMonth(today.getMonth() + 3);
@@ -108,11 +163,9 @@ export default function PatientDetailsPage() {
   // Auto-select doctor when doctors are loaded
   useEffect(() => {
     if (doctors.length > 0 && !selectedDoctor) {
-      // If user is a doctor, select themselves
       if (userProfile?.role === "doctor") {
         setSelectedDoctor(userProfile.uid);
       } else {
-        // Otherwise select the first available doctor
         setSelectedDoctor(doctors[0].uid);
       }
     }
@@ -126,17 +179,14 @@ export default function PatientDetailsPage() {
       cancelEditing();
     } catch (error) {
       console.error("Failed to save:", error);
-      // Error is already handled in the hook
     }
   };
 
   // Handle appointment creation using the smart modal
   const handleAppointmentCreated = async () => {
     try {
-      // Refresh patient data to show new appointment
       await refreshData();
 
-      // Reload doctor appointments for future scheduling
       if (selectedDoctor) {
         const today = new Date();
         const futureDate = new Date();
@@ -151,10 +201,43 @@ export default function PatientDetailsPage() {
         setAllDoctorAppointments(doctorAppointments);
       }
 
-      // Close modal
       setShowNewAppointmentModal(false);
     } catch (error) {
       console.error("Error refreshing data:", error);
+    }
+  };
+
+  // Handle treatment creation
+  const handleCreateTreatment = async () => {
+    try {
+      if (!patient || !selectedDoctor) return;
+
+      const treatmentData = {
+        patientId: patient.id!,
+        doctorId: selectedDoctor,
+        date: Timestamp.fromDate(new Date()),
+        treatment: newTreatment,
+        cost: newTreatment.cost,
+        status: newTreatment.status,
+        createdBy: userProfile?.uid || "",
+      };
+
+      await addTreatmentRecord(treatmentData);
+      await refreshData();
+      setShowNewTreatmentModal(false);
+
+      // Reset form with proper typing
+      setNewTreatment({
+        code: "",
+        description: "",
+        tooth: [],
+        diagnosis: "",
+        notes: "",
+        cost: { total: 0, insuranceCovered: 0, patientPortion: 0 },
+        status: "planned",
+      });
+    } catch (error) {
+      console.error("Error creating treatment:", error);
     }
   };
 
@@ -166,7 +249,7 @@ export default function PatientDetailsPage() {
       lastName: patient.lastName,
       email: patient.email,
       phone: patient.phone,
-      alternatePhone: patient.alternatePhone,
+      alternatePhone: patient.alternatePhone || "", // Ensure it's not undefined
       status: patient.status,
     });
   };
@@ -192,6 +275,22 @@ export default function PatientDetailsPage() {
     });
   };
 
+  // NEW: Medical conditions editing handler
+  const handleMedicalConditionsEdit = () => {
+    if (!patient) return;
+    startEditing("conditions", {
+      medicalHistory: { ...patient.medicalHistory },
+    });
+  };
+
+  // NEW: Surgeries editing handler
+  const handleSurgeriesEdit = () => {
+    if (!patient) return;
+    startEditing("surgeries", {
+      medicalHistory: { ...patient.medicalHistory },
+    });
+  };
+
   const handleDentalHistoryEdit = () => {
     if (!patient) return;
     startEditing("dentalHistory", {
@@ -203,6 +302,17 @@ export default function PatientDetailsPage() {
     if (!patient) return;
     startEditing("dentalProblems", {
       dentalHistory: { ...patient.dentalHistory },
+    });
+  };
+
+  // NEW: Clinical findings editing handler
+  const handleClinicalFindingsEdit = () => {
+    if (!patient) return;
+    startEditing("clinicalFindings", {
+      dentalHistory: {
+        ...patient.dentalHistory,
+        clinicalFindings: patient.dentalHistory.clinicalFindings || [],
+      },
     });
   };
 
@@ -365,10 +475,15 @@ export default function PatientDetailsPage() {
               Nueva Cita
             </Button>
           )}
-          <Button variant="outline">
-            <Activity className="mr-2 h-4 w-4" />
-            Nuevo Tratamiento
-          </Button>
+          {hasPermission("treatments:write") && (
+            <Button
+              variant="outline"
+              onClick={() => setShowNewTreatmentModal(true)}
+            >
+              <Activity className="mr-2 h-4 w-4" />
+              Nuevo Tratamiento
+            </Button>
+          )}
         </div>
       </div>
 
@@ -536,58 +651,256 @@ export default function PatientDetailsPage() {
               onRemoveFromArray={removeFromArray}
             />
 
-            {/* Medical Conditions */}
+            {/* ENHANCED: Medical Conditions Card */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Heart className="mr-2 h-5 w-5 text-purple-500" />
-                  Condiciones Médicas
+                <CardTitle className="flex items-center justify-between">
+                  <span className="flex items-center">
+                    <Heart className="mr-2 h-5 w-5 text-purple-500" />
+                    Condiciones Médicas
+                  </span>
+                  {hasPermission("patients:write") && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={
+                        editingSection === "conditions"
+                          ? cancelEditing
+                          : handleMedicalConditionsEdit
+                      }
+                    >
+                      {editingSection === "conditions" ? (
+                        <XCircle className="h-4 w-4" />
+                      ) : (
+                        <Edit className="h-4 w-4" />
+                      )}
+                    </Button>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {patient.medicalHistory.medicalConditions.length > 0 ? (
-                  <div className="space-y-2">
-                    {patient.medicalHistory.medicalConditions.map(
-                      (condition, index) => (
+                {editingSection === "conditions" ? (
+                  <div className="space-y-4">
+                    {editableData.medicalHistory?.medicalConditions?.map(
+                      (condition: string, index: number) => (
                         <div
                           key={index}
-                          className="p-2 bg-purple-50 rounded border-l-4 border-purple-400"
+                          className="flex items-center space-x-2 p-2 bg-purple-50 rounded border"
                         >
-                          {condition}
+                          <span className="flex-1">{condition}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              removeFromArray(
+                                "medicalHistory",
+                                "medicalConditions",
+                                index
+                              )
+                            }
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
                         </div>
                       )
                     )}
+                    <div className="flex space-x-2">
+                      <Input
+                        placeholder="Nueva condición médica"
+                        onKeyDown={(e) => {
+                          if (
+                            e.key === "Enter" &&
+                            e.currentTarget.value.trim()
+                          ) {
+                            addToArray(
+                              "medicalHistory",
+                              "medicalConditions",
+                              e.currentTarget.value.trim()
+                            );
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          const input =
+                            e.currentTarget.parentElement?.querySelector(
+                              "input"
+                            );
+                          if (input?.value.trim()) {
+                            addToArray(
+                              "medicalHistory",
+                              "medicalConditions",
+                              input.value.trim()
+                            );
+                            input.value = "";
+                          }
+                        }}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="flex space-x-2">
+                      <Button
+                        onClick={handleSave}
+                        disabled={!isValid || isSaving}
+                      >
+                        <Save className="mr-2 h-4 w-4" />
+                        {isSaving ? "Guardando..." : "Guardar"}
+                      </Button>
+                      <Button variant="outline" onClick={cancelEditing}>
+                        Cancelar
+                      </Button>
+                    </div>
                   </div>
                 ) : (
-                  <p className="text-gray-500">
-                    Sin condiciones médicas reportadas
-                  </p>
+                  <>
+                    {patient.medicalHistory.medicalConditions.length > 0 ? (
+                      <div className="space-y-2">
+                        {patient.medicalHistory.medicalConditions.map(
+                          (condition, index) => (
+                            <div
+                              key={index}
+                              className="p-2 bg-purple-50 rounded border-l-4 border-purple-400"
+                            >
+                              {condition}
+                            </div>
+                          )
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">
+                        Sin condiciones médicas reportadas
+                      </p>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>
 
-            {/* Surgeries */}
+            {/* ENHANCED: Surgeries Card */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Stethoscope className="mr-2 h-5 w-5 text-green-500" />
-                  Cirugías Previas
+                <CardTitle className="flex items-center justify-between">
+                  <span className="flex items-center">
+                    <Stethoscope className="mr-2 h-5 w-5 text-green-500" />
+                    Cirugías Previas
+                  </span>
+                  {hasPermission("patients:write") && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={
+                        editingSection === "surgeries"
+                          ? cancelEditing
+                          : handleSurgeriesEdit
+                      }
+                    >
+                      {editingSection === "surgeries" ? (
+                        <XCircle className="h-4 w-4" />
+                      ) : (
+                        <Edit className="h-4 w-4" />
+                      )}
+                    </Button>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {patient.medicalHistory.surgeries.length > 0 ? (
-                  <div className="space-y-2">
-                    {patient.medicalHistory.surgeries.map((surgery, index) => (
-                      <div
-                        key={index}
-                        className="p-2 bg-green-50 rounded border-l-4 border-green-400"
+                {editingSection === "surgeries" ? (
+                  <div className="space-y-4">
+                    {editableData.medicalHistory?.surgeries?.map(
+                      (surgery: string, index: number) => (
+                        <div
+                          key={index}
+                          className="flex items-center space-x-2 p-2 bg-green-50 rounded border"
+                        >
+                          <span className="flex-1">{surgery}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              removeFromArray(
+                                "medicalHistory",
+                                "surgeries",
+                                index
+                              )
+                            }
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )
+                    )}
+                    <div className="flex space-x-2">
+                      <Input
+                        placeholder="Nueva cirugía"
+                        onKeyDown={(e) => {
+                          if (
+                            e.key === "Enter" &&
+                            e.currentTarget.value.trim()
+                          ) {
+                            addToArray(
+                              "medicalHistory",
+                              "surgeries",
+                              e.currentTarget.value.trim()
+                            );
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          const input =
+                            e.currentTarget.parentElement?.querySelector(
+                              "input"
+                            );
+                          if (input?.value.trim()) {
+                            addToArray(
+                              "medicalHistory",
+                              "surgeries",
+                              input.value.trim()
+                            );
+                            input.value = "";
+                          }
+                        }}
                       >
-                        {surgery}
-                      </div>
-                    ))}
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="flex space-x-2">
+                      <Button
+                        onClick={handleSave}
+                        disabled={!isValid || isSaving}
+                      >
+                        <Save className="mr-2 h-4 w-4" />
+                        {isSaving ? "Guardando..." : "Guardar"}
+                      </Button>
+                      <Button variant="outline" onClick={cancelEditing}>
+                        Cancelar
+                      </Button>
+                    </div>
                   </div>
                 ) : (
-                  <p className="text-gray-500">Sin cirugías previas</p>
+                  <>
+                    {patient.medicalHistory.surgeries.length > 0 ? (
+                      <div className="space-y-2">
+                        {patient.medicalHistory.surgeries.map(
+                          (surgery, index) => (
+                            <div
+                              key={index}
+                              className="p-2 bg-green-50 rounded border-l-4 border-green-400"
+                            >
+                              {surgery}
+                            </div>
+                          )
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">Sin cirugías previas</p>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -625,6 +938,135 @@ export default function PatientDetailsPage() {
               onAddToArray={addToArray}
               onRemoveFromArray={removeFromArray}
             />
+
+            {/* NEW: Clinical Findings / Accidents Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span className="flex items-center">
+                    <AlertTriangle className="mr-2 h-5 w-5 text-orange-500" />
+                    Accidentes/Hallazgos Clínicos
+                  </span>
+                  {hasPermission("patients:write") && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={
+                        editingSection === "clinicalFindings"
+                          ? cancelEditing
+                          : handleClinicalFindingsEdit
+                      }
+                    >
+                      {editingSection === "clinicalFindings" ? (
+                        <XCircle className="h-4 w-4" />
+                      ) : (
+                        <Edit className="h-4 w-4" />
+                      )}
+                    </Button>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {editingSection === "clinicalFindings" ? (
+                  <div className="space-y-4">
+                    {editableData.dentalHistory?.clinicalFindings?.map(
+                      (finding: string, index: number) => (
+                        <div
+                          key={index}
+                          className="flex items-center space-x-2 p-2 bg-orange-50 rounded border"
+                        >
+                          <span className="flex-1">{finding}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              removeFromArray(
+                                "dentalHistory",
+                                "clinicalFindings",
+                                index
+                              )
+                            }
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )
+                    )}
+                    <div className="flex space-x-2">
+                      <Input
+                        placeholder="Nuevo hallazgo clínico o accidente"
+                        onKeyDown={(e) => {
+                          if (
+                            e.key === "Enter" &&
+                            e.currentTarget.value.trim()
+                          ) {
+                            addToArray(
+                              "dentalHistory",
+                              "clinicalFindings",
+                              e.currentTarget.value.trim()
+                            );
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          const input =
+                            e.currentTarget.parentElement?.querySelector(
+                              "input"
+                            );
+                          if (input?.value.trim()) {
+                            addToArray(
+                              "dentalHistory",
+                              "clinicalFindings",
+                              input.value.trim()
+                            );
+                            input.value = "";
+                          }
+                        }}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="flex space-x-2">
+                      <Button
+                        onClick={handleSave}
+                        disabled={!isValid || isSaving}
+                      >
+                        <Save className="mr-2 h-4 w-4" />
+                        {isSaving ? "Guardando..." : "Guardar"}
+                      </Button>
+                      <Button variant="outline" onClick={cancelEditing}>
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {(patient.dentalHistory.clinicalFindings?.length ?? 0) >
+                    0 ? (
+                      <div className="space-y-2">
+                        {(patient.dentalHistory.clinicalFindings || []).map(
+                          (finding, index) => (
+                            <div
+                              key={index}
+                              className="p-2 bg-orange-50 rounded border-l-4 border-orange-400"
+                            >
+                              {finding}
+                            </div>
+                          )
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-gray-500">
+                        Sin hallazgos clínicos o accidentes reportados
+                      </p>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
@@ -751,9 +1193,20 @@ export default function PatientDetailsPage() {
         <TabsContent value="treatments" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center">
-                <FileText className="mr-2 h-5 w-5" />
-                Historial de Tratamientos ({treatments.length})
+              <CardTitle className="flex items-center justify-between">
+                <span className="flex items-center">
+                  <FileText className="mr-2 h-5 w-5" />
+                  Historial de Tratamientos ({treatments.length})
+                </span>
+                {hasPermission("treatments:write") && (
+                  <Button
+                    size="sm"
+                    onClick={() => setShowNewTreatmentModal(true)}
+                  >
+                    <Activity className="mr-2 h-4 w-4" />
+                    Nuevo Tratamiento
+                  </Button>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -822,10 +1275,12 @@ export default function PatientDetailsPage() {
                   <p className="text-gray-500 mb-4">
                     Este paciente aún no tiene tratamientos en su historial.
                   </p>
-                  <Button variant="outline">
-                    <Activity className="mr-2 h-4 w-4" />
-                    Agregar Tratamiento
-                  </Button>
+                  {hasPermission("treatments:write") && (
+                    <Button onClick={() => setShowNewTreatmentModal(true)}>
+                      <Activity className="mr-2 h-4 w-4" />
+                      Agregar Tratamiento
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -839,13 +1294,204 @@ export default function PatientDetailsPage() {
           isOpen={showNewAppointmentModal}
           onClose={() => setShowNewAppointmentModal(false)}
           onSuccess={handleAppointmentCreated}
-          selectedTimeSlot={null} // No pre-selected time slot from patient page
+          selectedTimeSlot={null}
           selectedDoctor={selectedDoctor}
-          patients={[]} // Empty array since we're using preSelectedPatient
-          appointments={allDoctorAppointments} // Pass all doctor appointments for conflict detection
-          preSelectedPatient={patient} // Pass the current patient directly
+          patients={[]}
+          appointments={allDoctorAppointments}
+          preSelectedPatient={patient}
         />
       )}
+
+      {/* NEW: Treatment Creation Modal */}
+      <Dialog
+        open={showNewTreatmentModal}
+        onOpenChange={setShowNewTreatmentModal}
+      >
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Nuevo Tratamiento</DialogTitle>
+            <DialogDescription>
+              Agregar un nuevo tratamiento para {patient.fullName}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="treatment-code">Código</Label>
+                <Input
+                  id="treatment-code"
+                  placeholder="D0150"
+                  value={newTreatment.code}
+                  onChange={(e) =>
+                    setNewTreatment((prev) => ({
+                      ...prev,
+                      code: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="treatment-status">Estado</Label>
+                <Select
+                  value={newTreatment.status}
+                  onValueChange={(
+                    value: "planned" | "in_progress" | "completed" | "cancelled"
+                  ) => setNewTreatment((prev) => ({ ...prev, status: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="planned">Planificado</SelectItem>
+                    <SelectItem value="in_progress">En Progreso</SelectItem>
+                    <SelectItem value="completed">Completado</SelectItem>
+                    <SelectItem value="cancelled">Cancelado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="treatment-description">Descripción</Label>
+              <Input
+                id="treatment-description"
+                placeholder="Limpieza dental completa"
+                value={newTreatment.description}
+                onChange={(e) =>
+                  setNewTreatment((prev) => ({
+                    ...prev,
+                    description: e.target.value,
+                  }))
+                }
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="treatment-tooth">
+                Piezas Dentales (separadas por coma)
+              </Label>
+              <Input
+                id="treatment-tooth"
+                placeholder="1, 2, 3"
+                value={newTreatment.tooth.join(", ")}
+                onChange={(e) =>
+                  setNewTreatment((prev) => ({
+                    ...prev,
+                    tooth: e.target.value
+                      .split(",")
+                      .map((t) => t.trim())
+                      .filter((t) => t),
+                  }))
+                }
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="treatment-diagnosis">Diagnóstico</Label>
+              <Textarea
+                id="treatment-diagnosis"
+                placeholder="Diagnóstico del tratamiento..."
+                value={newTreatment.diagnosis}
+                onChange={(e) =>
+                  setNewTreatment((prev) => ({
+                    ...prev,
+                    diagnosis: e.target.value,
+                  }))
+                }
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="treatment-notes">Notas</Label>
+              <Textarea
+                id="treatment-notes"
+                placeholder="Notas adicionales..."
+                value={newTreatment.notes}
+                onChange={(e) =>
+                  setNewTreatment((prev) => ({
+                    ...prev,
+                    notes: e.target.value,
+                  }))
+                }
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="cost-total">Costo Total</Label>
+                <Input
+                  id="cost-total"
+                  type="number"
+                  placeholder="0"
+                  value={newTreatment.cost.total}
+                  onChange={(e) =>
+                    setNewTreatment((prev) => ({
+                      ...prev,
+                      cost: {
+                        ...prev.cost,
+                        total: parseFloat(e.target.value) || 0,
+                      },
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cost-insurance">Seguro Cubre</Label>
+                <Input
+                  id="cost-insurance"
+                  type="number"
+                  placeholder="0"
+                  value={newTreatment.cost.insuranceCovered}
+                  onChange={(e) =>
+                    setNewTreatment((prev) => ({
+                      ...prev,
+                      cost: {
+                        ...prev.cost,
+                        insuranceCovered: parseFloat(e.target.value) || 0,
+                      },
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cost-patient">Porción Paciente</Label>
+                <Input
+                  id="cost-patient"
+                  type="number"
+                  placeholder="0"
+                  value={newTreatment.cost.patientPortion}
+                  onChange={(e) =>
+                    setNewTreatment((prev) => ({
+                      ...prev,
+                      cost: {
+                        ...prev.cost,
+                        patientPortion: parseFloat(e.target.value) || 0,
+                      },
+                    }))
+                  }
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowNewTreatmentModal(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleCreateTreatment}
+              disabled={!newTreatment.description || !selectedDoctor}
+            >
+              <Activity className="mr-2 h-4 w-4" />
+              Crear Tratamiento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

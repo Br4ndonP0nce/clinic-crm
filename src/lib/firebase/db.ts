@@ -1,3 +1,4 @@
+// src/lib/firebase/db.ts - Enhanced with clinicalFindings field
 import { 
   collection, 
   addDoc, 
@@ -16,10 +17,9 @@ import {
 import { db } from './config';
 
 // =============================================================================
-// DENTAL PRACTICE MANAGEMENT SYSTEM - DATABASE LAYER
+// ENHANCED PATIENT INTERFACE WITH CLINICAL FINDINGS
 // =============================================================================
 
-// Core Types for Dental Practice
 export interface Patient {
   id?: string;
   
@@ -29,7 +29,7 @@ export interface Patient {
   fullName: string; // computed: firstName + lastName
   email: string;
   phone: string;
-  alternatePhone?: string;
+  alternatePhone?: string; // Made explicitly optional
   dateOfBirth: Timestamp;
   gender: 'male' | 'female' | 'other' | 'prefer_not_to_say';
   
@@ -69,7 +69,7 @@ export interface Patient {
     primaryPhysician?: string;
   };
   
-  // Dental History
+  // Enhanced Dental History with Clinical Findings
   dentalHistory: {
     lastVisit?: Timestamp;
     lastCleaning?: Timestamp;
@@ -80,6 +80,7 @@ export interface Patient {
     flossingFrequency: 'daily' | 'few_times_week' | 'weekly' | 'rarely' | 'never';
     currentProblems: string[];
     painLevel?: number; // 1-10 scale
+    clinicalFindings?: string[]; // NEW: Clinical findings and accidents
   };
   
   // Patient Status (evolved from Lead status)
@@ -188,35 +189,44 @@ export interface TreatmentRecord {
   status: 'planned' | 'in_progress' | 'completed' | 'cancelled';
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  createdBy: string;
 }
 
 // =============================================================================
 // FIRESTORE COLLECTIONS
 // =============================================================================
 
-const PATIENTS_COLLECTION = 'patients'; // Renamed from 'leads'
+const PATIENTS_COLLECTION = 'patients';
 const APPOINTMENTS_COLLECTION = 'appointments';
 const TREATMENTS_COLLECTION = 'treatments';
-const CONTENT_COLLECTION = 'content'; // Keep existing for website
+const CONTENT_COLLECTION = 'content';
 
 // =============================================================================
-// PATIENT MANAGEMENT FUNCTIONS (Evolved from Lead functions)
+// PATIENT MANAGEMENT FUNCTIONS
 // =============================================================================
 
 /**
- * Add a new patient to Firestore
+ * Add a new patient to Firestore with enhanced validation
  */
 export const addPatient = async (patientData: Omit<Patient, 'id' | 'createdAt' | 'updatedAt' | 'fullName'>): Promise<string> => {
   try {
     const fullName = `${patientData.firstName} ${patientData.lastName}`.trim();
     
-    const docRef = await addDoc(collection(db, PATIENTS_COLLECTION), {
+    // Ensure clinicalFindings exists in dentalHistory
+    const enhancedPatientData = {
       ...patientData,
       fullName,
-      status: patientData.status || 'inquiry', // Default status
+      status: patientData.status || 'inquiry',
+      alternatePhone: patientData.alternatePhone || '', // Ensure empty string instead of undefined
+      dentalHistory: {
+        ...patientData.dentalHistory,
+        clinicalFindings: patientData.dentalHistory.clinicalFindings || [], // Initialize if not present
+      },
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
-    });
+    };
+    
+    const docRef = await addDoc(collection(db, PATIENTS_COLLECTION), enhancedPatientData);
     
     return docRef.id;
   } catch (error) {
@@ -224,6 +234,10 @@ export const addPatient = async (patientData: Omit<Patient, 'id' | 'createdAt' |
     throw error;
   }
 };
+
+/**
+ * Delete appointment
+ */
 export const deleteAppointment = async (appointmentId: string): Promise<void> => {
   try {
     const appointmentRef = doc(db, APPOINTMENTS_COLLECTION, appointmentId);
@@ -233,9 +247,9 @@ export const deleteAppointment = async (appointmentId: string): Promise<void> =>
     throw error;
   }
 };
+
 /**
- * Cancel multiple appointments (bulk operation)
- * Useful for when a doctor is unavailable for a day
+ * Bulk delete appointments
  */
 export const bulkDeleteAppointments = async (appointmentIds: string[]): Promise<void> => {
   try {
@@ -249,8 +263,9 @@ export const bulkDeleteAppointments = async (appointmentIds: string[]): Promise<
     throw error;
   }
 };
+
 /**
- * Update a patient's status or data
+ * Get user profile
  */
 export const getUser = async (userId: string) => {
   try {
@@ -264,6 +279,10 @@ export const getUser = async (userId: string) => {
     throw error;
   }
 };
+
+/**
+ * Update patient with enhanced handling for alternatePhone and clinicalFindings
+ */
 export const updatePatient = async (patientId: string, data: Partial<Patient>, performedBy?: string): Promise<void> => {
   try {
     const patientRef = doc(db, PATIENTS_COLLECTION, patientId);
@@ -297,6 +316,16 @@ export const updatePatient = async (patientId: string, data: Partial<Patient>, p
       }
     }
     
+    // Ensure alternatePhone is handled properly
+    if (data.alternatePhone === undefined) {
+      data.alternatePhone = '';
+    }
+    
+    // Ensure clinicalFindings exists in dentalHistory updates
+    if (data.dentalHistory && !data.dentalHistory.clinicalFindings) {
+      data.dentalHistory.clinicalFindings = [];
+    }
+    
     await updateDoc(patientRef, {
       ...data,
       updatedAt: serverTimestamp()
@@ -316,7 +345,19 @@ export const getPatient = async (patientId: string): Promise<Patient | null> => 
     const patientSnap = await getDoc(patientRef);
     
     if (patientSnap.exists()) {
-      return { id: patientSnap.id, ...patientSnap.data() } as Patient;
+      const patientData = { id: patientSnap.id, ...patientSnap.data() } as Patient;
+      
+      // Ensure clinicalFindings exists for backward compatibility
+      if (!patientData.dentalHistory.clinicalFindings) {
+        patientData.dentalHistory.clinicalFindings = [];
+      }
+      
+      // Ensure alternatePhone is properly handled
+      if (patientData.alternatePhone === undefined) {
+        patientData.alternatePhone = '';
+      }
+      
+      return patientData;
     } else {
       return null;
     }
@@ -350,7 +391,17 @@ export const getPatients = async (status?: Patient['status'], limit?: number): P
     const patients: Patient[] = [];
     
     querySnapshot.forEach((doc) => {
-      patients.push({ id: doc.id, ...doc.data() } as Patient);
+      const patientData = { id: doc.id, ...doc.data() } as Patient;
+      
+      // Ensure backward compatibility
+      if (!patientData.dentalHistory.clinicalFindings) {
+        patientData.dentalHistory.clinicalFindings = [];
+      }
+      if (patientData.alternatePhone === undefined) {
+        patientData.alternatePhone = '';
+      }
+      
+      patients.push(patientData);
     });
     
     return patients;
@@ -365,10 +416,6 @@ export const getPatients = async (status?: Patient['status'], limit?: number): P
  */
 export const searchPatients = async (searchTerm: string): Promise<Patient[]> => {
   try {
-    // Note: Firestore doesn't support native text search
-    // For small datasets, we can fetch all and filter client-side
-    // For production, consider Algolia or similar search service
-    
     const allPatients = await getPatients();
     const searchTermLower = searchTerm.toLowerCase();
     
@@ -377,7 +424,8 @@ export const searchPatients = async (searchTerm: string): Promise<Patient[]> => 
       patient.firstName.toLowerCase().includes(searchTermLower) ||
       patient.lastName.toLowerCase().includes(searchTermLower) ||
       patient.email.toLowerCase().includes(searchTermLower) ||
-      patient.phone.toLowerCase().includes(searchTermLower)
+      patient.phone.toLowerCase().includes(searchTermLower) ||
+      (patient.alternatePhone && patient.alternatePhone.toLowerCase().includes(searchTermLower))
     );
   } catch (error) {
     console.error('Error searching patients:', error);
@@ -386,7 +434,7 @@ export const searchPatients = async (searchTerm: string): Promise<Patient[]> => 
 };
 
 /**
- * Get patients by assigned provider (doctor/hygienist)
+ * Get patients by assigned provider
  */
 export const getPatientsByProvider = async (providerId: string): Promise<Patient[]> => {
   try {
@@ -400,7 +448,17 @@ export const getPatientsByProvider = async (providerId: string): Promise<Patient
     const patients: Patient[] = [];
     
     querySnapshot.forEach((doc) => {
-      patients.push({ id: doc.id, ...doc.data() } as Patient);
+      const patientData = { id: doc.id, ...doc.data() } as Patient;
+      
+      // Ensure backward compatibility
+      if (!patientData.dentalHistory.clinicalFindings) {
+        patientData.dentalHistory.clinicalFindings = [];
+      }
+      if (patientData.alternatePhone === undefined) {
+        patientData.alternatePhone = '';
+      }
+      
+      patients.push(patientData);
     });
     
     return patients;
@@ -432,6 +490,7 @@ export const addAppointment = async (appointmentData: Omit<Appointment, 'id' | '
     throw error;
   }
 };
+
 /**
  * Get a single appointment by ID
  */
@@ -450,6 +509,7 @@ export const getAppointment = async (appointmentId: string): Promise<Appointment
     throw error;
   }
 };
+
 /**
  * Get appointments for a specific date range
  */
@@ -493,6 +553,7 @@ export const getAppointments = async (
     throw error;
   }
 };
+
 /**
  * Get appointments by status
  */
@@ -529,6 +590,7 @@ export const getAppointmentsByStatus = async (
     throw error;
   }
 };
+
 /**
  * Update appointment status
  */
@@ -668,12 +730,10 @@ export const updateContent = async (contentId: string, value: string): Promise<v
 // BACKWARD COMPATIBILITY (For gradual migration)
 // =============================================================================
 
-// Keep these aliases for existing code during transition
 export const addLead = addPatient;
 export const getLead = getPatient;
 export const getLeads = getPatients;
 export const updateLead = updatePatient;
 export const searchLeads = searchPatients;
 
-// Export legacy Lead type as alias
 export type Lead = Patient;
