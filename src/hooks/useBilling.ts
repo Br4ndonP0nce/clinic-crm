@@ -227,7 +227,25 @@ export const useBillingReports = (): UseBillingReportsReturn => {
     }
   }, [userProfile?.uid, refreshReports]);
 
-  const updateServices = useCallback(async (
+const updateServices = useCallback(async (
+ reportId: string, 
+    services: BillingService[], 
+    discount: number = 0,
+  customTax?: number // 🆕 NEW: Optional custom tax parameter
+): Promise<void> => {
+  if (!userProfile?.uid || !reportId) throw new Error('User not authenticated or no report selected');
+  
+  try {
+    // 🆕 UPDATED: Pass custom tax to the backend
+    await updateBillingServices(reportId, services, discount, userProfile.uid, customTax);
+    await refreshReports();
+  } catch (err) {
+    console.error('Error updating services:', err);
+    throw err;
+  }
+}, [userProfile?.uid, refreshReports]);
+  /*
+   const updateServices = useCallback(async (
     reportId: string, 
     services: BillingService[], 
     discount: number = 0
@@ -241,7 +259,7 @@ export const useBillingReports = (): UseBillingReportsReturn => {
       console.error('Error updating services:', err);
       throw err;
     }
-  }, [userProfile?.uid, refreshReports]);
+  }, [userProfile?.uid, refreshReports]);*/
 
   const addPayment = useCallback(async (
     reportId: string, 
@@ -319,7 +337,7 @@ interface UseBillingReportReturn {
   // Existing Actions
   loadReport: (reportId: string) => Promise<void>;
   loadReportByAppointment: (appointmentId: string) => Promise<void>;
-  updateServices: (services: BillingService[], discount?: number) => Promise<void>;
+  updateServices: (services: BillingService[], discount?: number, customTax?: number) => Promise<void>; // 🆕 UPDATED
   addPayment: (payment: BillingPaymentInput) => Promise<void>;
   completeReport: (notes?: string) => Promise<void>;
   updateNotes: (notes: string, internalNotes: string) => Promise<void>;
@@ -373,14 +391,25 @@ export const useBillingReport = (reportId?: string): UseBillingReportReturn => {
     }
   }, [currentReportId, loadReport]);
 
+  // 🆕 FIXED: Updated updateServices with customTax parameter
   const updateServices = useCallback(async (
     services: BillingService[], 
-    discount: number = 0
+    discount: number = 0,
+    customTax?: number // 🆕 NEW: Optional custom tax parameter
   ): Promise<void> => {
     if (!userProfile?.uid || !currentReportId) throw new Error('User not authenticated or no report selected');
     
     try {
-      await updateBillingServices(currentReportId, services, discount, userProfile.uid);
+      console.log('Hook: Calling updateBillingServices with:', {
+        reportId: currentReportId,
+        servicesCount: services.length,
+        discount,
+        customTax,
+        userProfile: userProfile.uid
+      });
+
+      // 🆕 UPDATED: Pass custom tax to the backend
+      await updateBillingServices(currentReportId, services, discount, userProfile.uid, customTax);
       await refreshReport();
     } catch (err) {
       console.error('Error updating services:', err);
@@ -442,7 +471,7 @@ export const useBillingReport = (reportId?: string): UseBillingReportReturn => {
     error,
     loadReport,
     loadReportByAppointment,
-    updateServices,
+    updateServices, // 🆕 This now has the correct signature
     addPayment,
     completeReport,
     updateNotes,

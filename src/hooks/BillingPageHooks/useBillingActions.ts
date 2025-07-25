@@ -2,6 +2,7 @@
 import { useState, useMemo } from 'react';
 import { generateBillingPDF } from '@/lib/utils/pdf';
 import { toast } from 'sonner';
+import { deleteBillingReport,softDeleteBillingReport } from '@/lib/firebase/billing';
 export interface DateFilter {
   start: Date;
   end: Date;
@@ -176,64 +177,68 @@ export const useBillingActions = ({
   }, [canManageBilling, router]);
 
   // Export actions
-  const handleExport = useCallback(
-    async (
-      type: "reports" | "expenses" | "dashboard",
-      targetDateFilter: DateFilter
-    ) => {
-      try {
-        const dateLabel = targetDateFilter.label
-          .toLowerCase()
-          .replace(/\s/g, "_");
+const handleExport = useCallback(
+  async (
+    type: "reports" | "expenses" | "dashboard",
+    targetDateFilter: DateFilter
+  ) => {
+    const typeLabels = {
+      reports: "reportes",
+      expenses: "gastos", 
+      dashboard: "dashboard"
+    };
 
-        switch (type) {
-          case "reports":
-            await exportBillingReportsToExcel(
-              reports,
-              {},
-              {},
-              `reportes_${dateLabel}_${targetDateFilter.start
-                .toISOString()
-                .slice(0, 7)}.xlsx`
-            );
-            break;
+    const exportPromise = (async () => {
+      const dateLabel = targetDateFilter.label
+        .toLowerCase()
+        .replace(/\s/g, "_");
 
-          case "expenses":
-            await exportExpensesToExcel(
-              expenses,
-              {},
-              `gastos_${dateLabel}_${targetDateFilter.start
-                .toISOString()
-                .slice(0, 7)}.xlsx`
-            );
-            break;
+      switch (type) {
+        case "reports":
+          await exportBillingReportsToExcel(
+            reports,
+            {},
+            {},
+            `reportes_${dateLabel}_${targetDateFilter.start
+              .toISOString()
+              .slice(0, 7)}.xlsx`
+          );
+          break;
 
-          case "dashboard":
-            if (dashboard) {
-              await exportFinancialDashboardToExcel(
-                dashboard,
-                reports,
-                expenses,
-                `dashboard_${dateLabel}_${targetDateFilter.start
-                  .toISOString()
-                  .slice(0, 7)}.xlsx`
-              );
-            }
-            break;
-        }
+        case "expenses":
+          await exportExpensesToExcel(
+            expenses,
+            {},
+            `gastos_${dateLabel}_${targetDateFilter.start
+              .toISOString()
+              .slice(0, 7)}.xlsx`
+          );
+          break;
 
-        console.log(`Export completed for ${type} - ${targetDateFilter.label}`);
-      } catch (error) {
-        console.error(`Error exporting ${type}:`, error);
-        alert(
-          `Error al exportar ${type}: ${
-            error instanceof Error ? error.message : "Error desconocido"
-          }`
-        );
+        case "dashboard":
+          if (!dashboard) {
+            throw new Error("No hay datos del dashboard para exportar");
+          }
+          await exportFinancialDashboardToExcel(
+            dashboard,
+            reports,
+            expenses,
+            `dashboard_${dateLabel}_${targetDateFilter.start
+              .toISOString()
+              .slice(0, 7)}.xlsx`
+          );
+          break;
       }
-    },
-    [reports, expenses, dashboard]
-  );
+    })();
+
+    toast.promise(exportPromise, {
+      loading: `Exportando ${typeLabels[type]} para ${targetDateFilter.label}...`,
+      success: `${typeLabels[type].charAt(0).toUpperCase() + typeLabels[type].slice(1)} exportados exitosamente`,
+      error: (error) => `Error al exportar ${typeLabels[type]}: ${error instanceof Error ? error.message : 'Error desconocido'}`,
+    });
+  },
+  [reports, expenses, dashboard]
+);
 
   // CRUD actions
   const handlePDF = useCallback(async (report: BillingReport) => {
@@ -257,103 +262,134 @@ export const useBillingActions = ({
   }, []);
 
   const handleDeleteReport = useCallback(async (report: BillingReport) => {
-    if (!canManageBilling) {
-      alert("No tienes permisos para eliminar reportes");
-      return;
-    }
-    
-    if (confirm("¿Estás seguro de que deseas eliminar este reporte?")) {
-      console.log("Deleting report:", report.id);
-      // TODO: Implement delete logic
-      onRefresh();
-    }
-  }, [canManageBilling, onRefresh]);
-
-  // ✅ NEW: Delete expense implementation
-  const handleDeleteExpense = useCallback(async (expense: Expense) => {
-    if (!canManageBilling) {
-      alert("No tienes permisos para eliminar gastos");
-      return;
-    }
-    
-    // Double confirmation for delete
-    const confirmMessage = `¿Estás seguro de que deseas eliminar este gasto?\n\nDescripción: ${expense.description}\nMonto: ${new Intl.NumberFormat("es-MX", {
+  if (!canManageBilling) {
+    toast.error("Sin permisos", {
+      description: "No tienes permisos para eliminar reportes",
+      action: {
+        label: "Entendido",
+        onClick: () => toast.dismiss(),
+      },
+    });
+    return;
+  }
+  
+  // Custom confirmation with detailed info
+  const confirmMessage = `¿Eliminar reporte definitivamente?\n\n` +
+    `📄 Factura: ${report.invoiceNumber || 'Sin número'}\n` +
+    `💰 Total: ${new Intl.NumberFormat("es-MX", {
       style: "currency", 
       currency: "MXN"
-    }).format(expense.amount)}\n\nEsta acción no se puede deshacer.`;
-    
-    if (confirm(confirmMessage)) {
-      try {
-        await deleteExpense(expense.id!);
-        
-        // Show success message
-        alert("Gasto eliminado exitosamente");
-        
-        // Refresh data
-        onRefresh();
-      } catch (error) {
-        console.error("Error deleting expense:", error);
-        alert(
-          `Error al eliminar el gasto: ${
-            error instanceof Error ? error.message : "Error desconocido"
-          }`
-        );
-      }
+    }).format(report.total)}\n` +
+    `📊 Estado: ${report.status}\n` +
+    `📅 Fecha: ${report.createdAt?.toDate?.()?.toLocaleDateString('es-MX') || 'N/A'}\n\n` +
+    `⚠️ ADVERTENCIA: Esta acción es irreversible`;
+  
+  if (!confirm(confirmMessage)) {
+    toast.info("Eliminación cancelada");
+    return;
+  }
+
+  // Use toast.promise for better UX
+  toast.promise(
+    deleteBillingReport(report.id!).then(() => onRefresh()),
+    {
+      loading: "Eliminando reporte...",
+      success: (data) => {
+        return `Reporte ${report.invoiceNumber || report.id} eliminado exitosamente`;
+      },
+      error: (error) => {
+        return `Error al eliminar: ${error instanceof Error ? error.message : 'Error desconocido'}`;
+      },
     }
-  }, [canManageBilling, onRefresh]);
+  );
+}, [canManageBilling, onRefresh]);
+
+const handleDeleteExpense = useCallback(async (expense: Expense) => {
+  if (!canManageBilling) {
+    toast.error("Sin permisos para eliminar gastos");
+    return;
+  }
+  
+  const confirmMessage = `¿Eliminar este gasto?\n\n` +
+    `📝 ${expense.description}\n` +
+    `💰 ${new Intl.NumberFormat("es-MX", {
+      style: "currency", 
+      currency: "MXN"
+    }).format(expense.amount)}\n` +
+    `📂 Categoría: ${expense.category}\n\n` +
+    `Esta acción no se puede deshacer.`;
+  
+  if (!confirm(confirmMessage)) {
+    toast.info("Eliminación cancelada");
+    return;
+  }
+
+  toast.promise(
+    deleteExpense(expense.id!).then(() => onRefresh()),
+    {
+      loading: "Eliminando gasto...",
+      success: `Gasto "${expense.description}" eliminado exitosamente`,
+      error: (error) => `Error al eliminar: ${error instanceof Error ? error.message : 'Error desconocido'}`,
+    }
+  );
+}, [canManageBilling, onRefresh]);
 
   // ✅ NEW: Approve expense implementation  
-  const handleApproveExpense = useCallback(async (expense: Expense) => {
-    if (!canManageBilling) {
-      alert("No tienes permisos para aprobar gastos");
-      return;
-    }
-    
-    // Confirmation for approval
-    const confirmMessage = `¿Aprobar este gasto?\n\nDescripción: ${expense.description}\nMonto: ${new Intl.NumberFormat("es-MX", {
+const handleApproveExpense = useCallback(async (expense: Expense) => {
+  if (!canManageBilling) {
+    toast.error("Sin permisos para aprobar gastos");
+    return;
+  }
+  
+  const confirmMessage = `¿Aprobar este gasto?\n\n` +
+    `📝 ${expense.description}\n` +
+    `💰 ${new Intl.NumberFormat("es-MX", {
       style: "currency",
       currency: "MXN" 
-    }).format(expense.amount)}\nCategoría: ${expense.category}\n\nUna vez aprobado, el gasto contará para los reportes financieros.`;
-    
-    if (confirm(confirmMessage)) {
-      try {
-        // Update status to 'approved' which makes it count in financial reports
-        await updateExpenseStatus(
-          expense.id!, 
-          'approved', 
-          'system', // You might want to pass actual user ID here
-          'Gasto aprobado desde el dashboard'
-        );
-        
-        // Show success message
-        alert("Gasto aprobado exitosamente. Ahora aparecerá en los reportes financieros.");
-        
-        // Refresh data to show updated status
-        onRefresh();
-      } catch (error) {
-        console.error("Error approving expense:", error);
-        alert(
-          `Error al aprobar el gasto: ${
-            error instanceof Error ? error.message : "Error desconocido"
-          }`
-        );
-      }
+    }).format(expense.amount)}\n` +
+    `📂 ${expense.category}\n\n` +
+    `Una vez aprobado, aparecerá en reportes financieros.`;
+  
+  if (!confirm(confirmMessage)) {
+    toast.info("Aprobación cancelada");
+    return;
+  }
+
+  toast.promise(
+    updateExpenseStatus(
+      expense.id!, 
+      'approved', 
+      'system',
+      'Aprobado desde dashboard administrativo'
+    ).then(() => onRefresh()),
+    {
+      loading: "Aprobando gasto...",
+      success: (data) => {
+        return `Gasto "${expense.description}" aprobado y agregado a reportes financieros`;
+      },
+      error: (error) => `Error al aprobar: ${error instanceof Error ? error.message : 'Error desconocido'}`,
     }
-  }, [canManageBilling, onRefresh]);
+  );
+}, [canManageBilling, onRefresh]);
 
   // Expense management
-  const handleAddExpense = useCallback(
-    async (expenseData: any) => {
-      try {
-        await onAddExpense(expenseData);
-        onRefresh();
-      } catch (error) {
-        console.error("Error adding expense:", error);
-        throw error;
+const handleAddExpense = useCallback(
+  async (expenseData: any) => {
+    toast.promise(
+      onAddExpense(expenseData).then(() => onRefresh()),
+      {
+        loading: `Agregando gasto: ${expenseData.description || 'Nuevo gasto'}...`,
+        success: (data) => {
+          return `Gasto "${expenseData.description}" agregado exitosamente`;
+        },
+        error: (error) => {
+          return `Error al agregar gasto: ${error instanceof Error ? error.message : 'Error desconocido'}`;
+        },
       }
-    },
-    [onAddExpense, onRefresh]
-  );
+    );
+  },
+  [onAddExpense, onRefresh]
+);
 
   return {
     // Navigation

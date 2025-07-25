@@ -103,6 +103,70 @@ const cleanDataForFirestore = (data: any): any => {
   // Primitive values (string, number, boolean)
   return data;
 };
+export const deleteBillingReport = async (reportId: string): Promise<void> => {
+  try {
+    const reportRef = doc(db, BILLING_REPORTS_COLLECTION, reportId);
+    
+    // Optional: Verify the report exists before attempting deletion
+    const reportSnap = await getDoc(reportRef);
+    if (!reportSnap.exists()) {
+      throw new Error('Billing report not found');
+    }
+    
+    // Perform hard delete
+    await deleteDoc(reportRef);
+    
+    console.log(`Billing report ${reportId} successfully deleted`);
+  } catch (error) {
+    console.error('Error deleting billing report:', error);
+    throw error;
+  }
+};
+
+/**
+ * Soft delete a billing report (recommended approach)
+ * Marks the report as deleted but preserves data for recovery/audit
+ */
+export const softDeleteBillingReport = async (
+  reportId: string,
+  deletedBy: string,
+  reason?: string
+): Promise<void> => {
+  try {
+    const reportRef = doc(db, BILLING_REPORTS_COLLECTION, reportId);
+    const reportSnap = await getDoc(reportRef);
+    
+    if (!reportSnap.exists()) {
+      throw new Error('Billing report not found');
+    }
+
+    const report = reportSnap.data() as BillingReport;
+
+    // Create status history entry
+    const historyEntry: BillingStatusHistory = {
+      id: `history_${Date.now()}`,
+      previousStatus: report.status,
+      newStatus: 'deleted' as any, // Adding 'deleted' as a valid status
+      details: `Report soft deleted${reason ? ': ' + reason : ''}`,
+      performedBy: deletedBy,
+      performedAt: Timestamp.now()
+    };
+
+    await updateDoc(reportRef, {
+      status: 'deleted',
+      isDeleted: true,
+      deletedAt: serverTimestamp(),
+      deletedBy,
+      deleteReason: reason,
+      statusHistory: [...(report.statusHistory || []), historyEntry],
+      lastModifiedBy: deletedBy,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error soft deleting billing report:', error);
+    throw error;
+  }
+};
 const getNextReportSequence = async (appointmentId: string): Promise<number> => {
   try {
     const q = query(
@@ -595,7 +659,8 @@ export const updateBillingServices = async (
   reportId: string,
   services: BillingReport['services'],
   discount: number = 0,
-  updatedBy: string
+  updatedBy: string,
+  customTax?: number // 🆕 NEW: Optional custom tax amount
 ): Promise<void> => {
   try {
     const reportRef = doc(db, BILLING_REPORTS_COLLECTION, reportId);
@@ -639,7 +704,12 @@ export const updateBillingServices = async (
 
     // Calculate new totals
     const subtotal = cleanServices.reduce((sum, service) => sum + (service.total || 0), 0);
-    const tax = Math.round(subtotal * MEXICAN_TAX_RATE * 100) / 100;
+    
+    // 🆕 UPDATED: Use custom tax if provided, otherwise calculate with standard rate
+    const tax = customTax !== undefined 
+      ? Math.round(customTax * 100) / 100 
+      : Math.round(subtotal * MEXICAN_TAX_RATE * 100) / 100;
+    
     const cleanDiscount = Math.max(0, discount || 0);
     const total = Math.round((subtotal + tax - cleanDiscount) * 100) / 100;
     const pendingAmount = Math.max(0, total - (currentReport.paidAmount || 0));
@@ -649,7 +719,7 @@ export const updateBillingServices = async (
       id: `history_${Date.now()}`,
       previousStatus: currentReport.status,
       newStatus: currentReport.status,
-      details: `Services updated. New total: $${total.toFixed(2)}`,
+      details: `Services updated. New total: $${total.toFixed(2)}${customTax !== undefined ? ` (Custom tax: $${tax.toFixed(2)})` : ''}`,
       amount: total,
       performedBy: updatedBy,
       performedAt: Timestamp.now()
@@ -668,7 +738,12 @@ export const updateBillingServices = async (
       updatedAt: serverTimestamp()
     };
 
-    console.log('Updating billing services with clean data:', updateData);
+    console.log('Updating billing services with custom tax:', {
+      subtotal,
+      customTax,
+      calculatedTax: tax,
+      total
+    });
     
     await updateDoc(reportRef, updateData);
   } catch (error) {
