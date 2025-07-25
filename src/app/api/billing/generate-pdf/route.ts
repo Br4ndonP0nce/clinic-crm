@@ -102,14 +102,14 @@ async function generateBillingPDF({
 }): Promise<Buffer> {
   
   const env = getEnvironmentInfo();
-  console.log('🔍 Environment detected:', env);
+  //console.log('🔍 Environment detected:', env);
   
   let browser = null;
   
   try {
     if (env.isVercel) {
       // VERCEL: Use serverless chromium
-      console.log('🚀 Launching browser on Vercel...');
+      //console.log('🚀 Launching browser on Vercel...');
       
       const chromium = await import('@sparticuz/chromium');
       const puppeteer = await import('puppeteer-core');
@@ -122,7 +122,7 @@ async function generateBillingPDF({
       
     } else {
       // LOCAL/OTHER: Use regular puppeteer
-      console.log('💻 Launching browser locally...');
+     // console.log('💻 Launching browser locally...');
       
       try {
         // Try to use regular puppeteer first
@@ -136,7 +136,7 @@ async function generateBillingPDF({
           ]
         });
       } catch (localPuppeteerError) {
-        console.log('📦 Regular puppeteer not found, trying puppeteer-core...');
+       // console.log('📦 Regular puppeteer not found, trying puppeteer-core...');
         
         // Fallback: try to find local chromium
         const puppeteer = await import('puppeteer-core');
@@ -163,7 +163,7 @@ async function generateBillingPDF({
             const fs = await import('fs');
             if (fs.existsSync(path)) {
               executablePath = path;
-              console.log(`✅ Found Chrome/Chromium at: ${path}`);
+              //console.log(`✅ Found Chrome/Chromium at: ${path}`);
               break;
             }
           } catch (e) {
@@ -189,22 +189,22 @@ async function generateBillingPDF({
       }
     }
 
-    console.log('✅ Browser launched successfully');
+   // console.log('✅ Browser launched successfully');
 
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 1600 });
     page.setDefaultTimeout(25000);
 
-    console.log('📄 Generating HTML content...');
+   // console.log('📄 Generating HTML content...');
     const htmlContent = await generateInvoiceHTML({ report, patient, doctor });
 
-    console.log('🔧 Setting page content...');
+    //console.log('🔧 Setting page content...');
     await page.setContent(htmlContent, {
       waitUntil: 'domcontentloaded',
       timeout: 20000
     });
 
-    console.log('📋 Generating PDF...');
+   // console.log('📋 Generating PDF...');
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
@@ -216,7 +216,7 @@ async function generateBillingPDF({
       }
     });
 
-    console.log('✅ PDF generated successfully');
+    //console.log('✅ PDF generated successfully');
     return Buffer.from(pdfBuffer);
 
   } catch (error) {
@@ -224,7 +224,7 @@ async function generateBillingPDF({
     throw new Error(`PDF generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   } finally {
     if (browser) {
-      console.log('🔒 Closing browser...');
+     // console.log('🔒 Closing browser...');
       await browser.close();
     }
   }
@@ -233,38 +233,38 @@ async function generateBillingPDF({
 // 🆕 ENHANCED: Function to convert image to base64
 // Vercel-optimized image loading
 // Replace your getImageAsBase64 function with this debug version temporarily
-async function debugClinicConfig() {
+/*async function debugClinicConfig() {
   console.log('🏥 Clinic Config Debug:');
   console.log('PDF showLogo:', clinicConfig.pdf?.showLogo);
   console.log('Branding logoPath:', clinicConfig.branding?.logoPath);
   console.log('Full clinic config:', JSON.stringify(clinicConfig, null, 2));
-}
+}*/
 async function getImageAsBase64(imagePath: string): Promise<string> {
-  console.log(`🖼️  Loading image: ${imagePath}`);
+  //console.log(`🖼️  Loading image: ${imagePath}`);
   
   try {
     const fs = await import('fs');
     const path = await import('path');
     
     const fullPath = path.join(process.cwd(), 'public', imagePath);
-    console.log(`📁 Full path: ${fullPath}`);
+    //console.log(`📁 Full path: ${fullPath}`);
     
     // Debug: list files in public
     const publicDir = path.join(process.cwd(), 'public');
     if (fs.existsSync(publicDir)) {
       const files = fs.readdirSync(publicDir);
-      console.log(`📂 Files in public:`, files);
+      //console.log(`📂 Files in public:`, files);
     }
     
     // Check if file exists
     if (!fs.existsSync(fullPath)) {
-      console.log(`❌ Image not found at: ${fullPath}`);
+     // console.log(`❌ Image not found at: ${fullPath}`);
       return generateFallbackLogo();
     }
     
     // Read the file
     const imageBuffer = fs.readFileSync(fullPath);
-    console.log(`✅ Image loaded successfully, size: ${imageBuffer.length} bytes`);
+   // console.log(`✅ Image loaded successfully, size: ${imageBuffer.length} bytes`);
     
     // Get MIME type
     const extension = imagePath.split('.').pop()?.toLowerCase();
@@ -288,7 +288,7 @@ async function getImageAsBase64(imagePath: string): Promise<string> {
     
     // Convert to base64
     const base64 = imageBuffer.toString('base64');
-    console.log(`📊 Base64 length: ${base64.length}, MIME: ${mimeType}`);
+    //(`📊 Base64 length: ${base64.length}, MIME: ${mimeType}`);
     
     return `data:${mimeType};base64,${base64}`;
     
@@ -355,7 +355,7 @@ function generateWatermarkSvg(text: string = 'CLÍNICA DENTAL'): string {
 }
 export async function GET() {
   try {
-    console.log('🏥 Testing Puppeteer on Vercel...');
+    //console.log('🏥 Testing Puppeteer on Vercel...');
     
     const browser = await puppeteer.launch({
       args: chromium.args,
@@ -393,10 +393,10 @@ async function generateInvoiceHTML({
   patient: any;
   doctor: any;
     }): Promise<string> {
-     console.log('🏥 Clinic Config Debug:');
-  console.log('- showLogo:', clinicConfig.pdf.showLogo);
-  console.log('- logoPath:', clinicConfig.branding.logoPath);
-  console.log('- primaryColor:', clinicConfig.branding.primaryColor);
+    // console.log('🏥 Clinic Config Debug:');
+  //console.log('- showLogo:', clinicConfig.pdf.showLogo);
+  //console.log('- logoPath:', clinicConfig.branding.logoPath);
+  //console.log('- primaryColor:', clinicConfig.branding.primaryColor);
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('es-MX', {
       style: 'currency',
@@ -444,16 +444,16 @@ async function generateInvoiceHTML({
  let logoBase64 = '';
   if (clinicConfig.pdf.showLogo) {
     const logoPath = clinicConfig.branding.logoPath || 'logo.png';
-    console.log(`🖼️  Loading logo from: ${logoPath}`);
+    //console.log(`🖼️  Loading logo from: ${logoPath}`);
     logoBase64 = await getImageAsBase64(logoPath);
     
     if (logoBase64.includes('data:image/svg+xml')) {
-      console.log('⚠️  Using fallback SVG logo - real image failed to load');
+      //console.log('⚠️  Using fallback SVG logo - real image failed to load');
     } else {
-      console.log('✅ Real logo loaded successfully');
+      //console.log('✅ Real logo loaded successfully');
     }
   } else {
-    console.log('🚫 Logo disabled in clinic config');
+   // console.log('🚫 Logo disabled in clinic config');
   }  
   // 🆕 ENHANCED: Flexible watermark system
   let watermarkBase64 = '';
