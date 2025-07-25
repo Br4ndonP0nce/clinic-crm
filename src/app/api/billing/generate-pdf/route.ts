@@ -1,13 +1,26 @@
-// src/app/api/billing/generate-pdf/route.ts - ENHANCED WITH LOGO AND WATERMARK
+// src/app/api/billing/generate-pdf/route.ts - FIXED WITH PROPER TYPES
 import { NextRequest, NextResponse } from 'next/server';
 import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
-import { getBillingReport } from '@/lib/firebase/billing';
-import { getPatient } from '@/lib/firebase/db';
-import { getUserProfile } from '@/lib/firebase/rbac';
+import { adminDb, isAdminSDKConfigured } from '@/lib/firebase/admin';
 import { watermarkPresets } from '@/lib/utils/watermark';
 import { clinicConfig } from '@/config/clinic';
+import { BillingReport, BillingService, BillingPayment } from '@/types/billing';
+import { Patient } from '@/types/patient';
+
 export const maxDuration = 30; // Vercel function timeout
+
+// Define proper types for the PDF generation
+interface PDFGenerationData {
+  report: BillingReport & { id: string };
+  patient: Patient & { id: string };
+  doctor: {
+    id: string;
+    displayName: string;
+    email?: string;
+    uid: string;
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,34 +33,201 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch report data
-    const report = await getBillingReport(reportId);
-    if (!report) {
+    // Check if Admin SDK is configured
+    if (!isAdminSDKConfigured()) {
+      console.error('❌ Admin SDK not configured for PDF generation');
       return NextResponse.json(
-        { error: 'Report not found' },
+        { error: 'Server configuration error. Please contact administrator.' },
+        { status: 503 }
+      );
+    }
+
+    console.log('🔧 Fetching billing report data using Admin SDK...');
+
+    // Fetch report data using Admin SDK with proper error handling
+    const reportDoc = await adminDb.collection('billing_reports').doc(reportId).get();
+    if (!reportDoc.exists) {
+      return NextResponse.json(
+        { error: 'Billing report not found' },
         { status: 404 }
       );
     }
 
-    // Fetch related data
-    const [patient, doctor] = await Promise.all([
-      getPatient(report.patientId),
-      getUserProfile(report.doctorId)
+    const reportData = reportDoc.data();
+    if (!reportData) {
+      return NextResponse.json(
+        { error: 'Invalid report data' },
+        { status: 400 }
+      );
+    }
+
+    // Transform Firestore data to proper BillingReport type
+    const report: BillingReport & { id: string } = {
+      id: reportDoc.id,
+      appointmentId: reportData.appointmentId,
+      patientId: reportData.patientId,
+      doctorId: reportData.doctorId,
+      reportType: reportData.reportType || 'complete_visit',
+      reportTitle: reportData.reportTitle,
+      reportDescription: reportData.reportDescription,
+      isPartialReport: reportData.isPartialReport || false,
+      parentReportId: reportData.parentReportId,
+      reportSequence: reportData.reportSequence,
+      linkedReports: reportData.linkedReports || [],
+      linkType: reportData.linkType,
+      linkId: reportData.linkId,
+      linkNotes: reportData.linkNotes,
+      linkedBy: reportData.linkedBy,
+      linkedAt: reportData.linkedAt,
+      status: reportData.status || 'draft',
+      subtotal: reportData.subtotal || 0,
+      tax: reportData.tax || 0,
+      discount: reportData.discount || 0,
+      total: reportData.total || 0,
+      paidAmount: reportData.paidAmount || 0,
+      pendingAmount: reportData.pendingAmount || (reportData.total - reportData.paidAmount),
+      services: reportData.services || [],
+      payments: reportData.payments || [],
+      invoiceNumber: reportData.invoiceNumber,
+      invoiceDate: reportData.invoiceDate,
+      dueDate: reportData.dueDate,
+      notes: reportData.notes,
+      internalNotes: reportData.internalNotes,
+      pdfGenerated: reportData.pdfGenerated || false,
+      pdfUrl: reportData.pdfUrl,
+      archivedAt: reportData.archivedAt,
+      archivedBy: reportData.archivedBy,
+      archiveReason: reportData.archiveReason,
+      createdAt: reportData.createdAt,
+      updatedAt: reportData.updatedAt,
+      createdBy: reportData.createdBy || 'unknown',
+      lastModifiedBy: reportData.lastModifiedBy || reportData.createdBy || 'unknown',
+      statusHistory: reportData.statusHistory || []
+    };
+
+    console.log('✅ Report data fetched and transformed');
+
+    // Fetch related data using Admin SDK with proper error handling
+    const [patientDoc, doctorDoc] = await Promise.all([
+      adminDb.collection('patients').doc(report.patientId).get(),
+      adminDb.collection('app_users').doc(report.doctorId).get()
     ]);
 
-    if (!patient) {
+    if (!patientDoc.exists) {
       return NextResponse.json(
         { error: 'Patient not found' },
         { status: 404 }
       );
     }
 
-    // Generate PDF
+    const patientData = patientDoc.data();
+    if (!patientData) {
+      return NextResponse.json(
+        { error: 'Invalid patient data' },
+        { status: 400 }
+      );
+    }
+
+    // Transform patient data to proper Patient type
+    const patient: Patient & { id: string } = {
+      id: patientDoc.id,
+      firstName: patientData.firstName || '',
+      lastName: patientData.lastName || '',
+      fullName: patientData.fullName || `${patientData.firstName} ${patientData.lastName}`,
+      email: patientData.email || '',
+      phone: patientData.phone || '',
+      alternatePhone: patientData.alternatePhone,
+      dateOfBirth: patientData.dateOfBirth?.toDate?.() || new Date(),
+      gender: patientData.gender || 'prefer_not_to_say',
+      address: patientData.address || {
+        street: '',
+        city: '',
+        state: '',
+        zipCode: '',
+        country: ''
+      },
+      emergencyContact: patientData.emergencyContact || {
+        name: '',
+        relationship: '',
+        phone: ''
+      },
+      insurance: patientData.insurance || {
+        isActive: false
+      },
+      medicalHistory: patientData.medicalHistory || {
+        allergies: [],
+        medications: [],
+        medicalConditions: [],
+        surgeries: []
+      },
+      dentalHistory: patientData.dentalHistory || {
+        reasonForVisit: '',
+        oralHygiene: 'good',
+        brushingFrequency: 'twice_daily',
+        flossingFrequency: 'daily',
+        currentProblems: []
+      },
+      status: patientData.status || 'inquiry',
+      preferences: patientData.preferences || {
+        preferredTimeSlots: [],
+        preferredDays: [],
+        communicationMethod: 'phone',
+        reminderPreferences: {
+          email: true,
+          sms: true,
+          days: 1
+        }
+      },
+      financial: patientData.financial || {
+        paymentMethod: 'cash',
+        balance: 0
+      },
+      createdAt: patientData.createdAt?.toDate?.() || new Date(),
+      updatedAt: patientData.updatedAt?.toDate?.() || new Date(),
+      assignedTo: patientData.assignedTo,
+      createdBy: patientData.createdBy || 'unknown',
+      notes: patientData.notes || '',
+      statusHistory: patientData.statusHistory || [],
+      consents: patientData.consents || {
+        treatmentConsent: false,
+        privacyPolicy: false,
+        marketingEmails: false
+      }
+    };
+
+    // Handle doctor data with fallback
+    const doctorData = doctorDoc.exists ? doctorDoc.data() : null;
+    const doctor = {
+      id: doctorDoc.id,
+      displayName: doctorData?.displayName || 'Doctor',
+      email: doctorData?.email || '',
+      uid: doctorData?.uid || doctorDoc.id
+    };
+
+    console.log('✅ Related data fetched and transformed');
+
+    // Generate PDF with properly typed data
+    console.log('🔧 Starting PDF generation...');
     const pdfBuffer = await generateBillingPDF({
       report,
       patient,
-      doctor: doctor || { displayName: 'Doctor', email: '' }
+      doctor
     });
+
+    console.log('✅ PDF generated successfully');
+
+    // Update report to mark PDF as generated
+    try {
+      await adminDb.collection('billing_reports').doc(reportId).update({
+        pdfGenerated: true,
+        lastModifiedBy: 'pdf_generator',
+        updatedAt: new Date()
+      });
+      console.log('✅ Report updated with PDF generation status');
+    } catch (updateError) {
+      console.warn('⚠️ Could not update report PDF status:', updateError);
+      // Don't fail the entire operation for this
+    }
 
     return new Response(new Uint8Array(pdfBuffer), {
       status: 200,
@@ -55,19 +235,23 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="Factura-${report.invoiceNumber || report.id}.pdf"`,
         'Content-Length': pdfBuffer.length.toString(),
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
       },
     });
 
   } catch (error) {
-    console.error('Error generating PDF:', error);
+    console.error('❌ Error generating PDF:', error);
     
     const errorDetails = {
       message: error instanceof Error ? error.message : 'Unknown error',
       timestamp: new Date().toISOString(),
-      environment: getEnvironmentInfo()
+      environment: getEnvironmentInfo(),
+      stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
     };
     
-    console.error('PDF Generation Error:', errorDetails);
+    console.error('PDF Generation Error Details:', errorDetails);
 
     return NextResponse.json(
       { 
@@ -91,26 +275,13 @@ function getEnvironmentInfo() {
   };
 }
 
-async function generateBillingPDF({
-  report,
-  patient,
-  doctor
-}: {
-  report: any;
-  patient: any;
-  doctor: any;
-}): Promise<Buffer> {
-  
+async function generateBillingPDF(data: PDFGenerationData): Promise<Buffer> {
   const env = getEnvironmentInfo();
-  //console.log('🔍 Environment detected:', env);
-  
   let browser = null;
   
   try {
     if (env.isVercel) {
       // VERCEL: Use serverless chromium
-      //console.log('🚀 Launching browser on Vercel...');
-      
       const chromium = await import('@sparticuz/chromium');
       const puppeteer = await import('puppeteer-core');
       
@@ -122,8 +293,6 @@ async function generateBillingPDF({
       
     } else {
       // LOCAL/OTHER: Use regular puppeteer
-     // console.log('💻 Launching browser locally...');
-      
       try {
         // Try to use regular puppeteer first
         const puppeteer = await import('puppeteer');
@@ -136,8 +305,6 @@ async function generateBillingPDF({
           ]
         });
       } catch (localPuppeteerError) {
-       // console.log('📦 Regular puppeteer not found, trying puppeteer-core...');
-        
         // Fallback: try to find local chromium
         const puppeteer = await import('puppeteer-core');
         
@@ -163,7 +330,6 @@ async function generateBillingPDF({
             const fs = await import('fs');
             if (fs.existsSync(path)) {
               executablePath = path;
-              //console.log(`✅ Found Chrome/Chromium at: ${path}`);
               break;
             }
           } catch (e) {
@@ -189,22 +355,17 @@ async function generateBillingPDF({
       }
     }
 
-   // console.log('✅ Browser launched successfully');
-
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 1600 });
     page.setDefaultTimeout(25000);
 
-   // console.log('📄 Generating HTML content...');
-    const htmlContent = await generateInvoiceHTML({ report, patient, doctor });
+    const htmlContent = await generateInvoiceHTML(data);
 
-    //console.log('🔧 Setting page content...');
     await page.setContent(htmlContent, {
       waitUntil: 'domcontentloaded',
       timeout: 20000
     });
 
-   // console.log('📋 Generating PDF...');
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
@@ -216,7 +377,6 @@ async function generateBillingPDF({
       }
     });
 
-    //console.log('✅ PDF generated successfully');
     return Buffer.from(pdfBuffer);
 
   } catch (error) {
@@ -224,49 +384,25 @@ async function generateBillingPDF({
     throw new Error(`PDF generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   } finally {
     if (browser) {
-     // console.log('🔒 Closing browser...');
       await browser.close();
     }
   }
 }
 
-// 🆕 ENHANCED: Function to convert image to base64
-// Vercel-optimized image loading
-// Replace your getImageAsBase64 function with this debug version temporarily
-/*async function debugClinicConfig() {
-  console.log('🏥 Clinic Config Debug:');
-  console.log('PDF showLogo:', clinicConfig.pdf?.showLogo);
-  console.log('Branding logoPath:', clinicConfig.branding?.logoPath);
-  console.log('Full clinic config:', JSON.stringify(clinicConfig, null, 2));
-}*/
+// Enhanced image loading function with better error handling
 async function getImageAsBase64(imagePath: string): Promise<string> {
-  //console.log(`🖼️  Loading image: ${imagePath}`);
-  
   try {
     const fs = await import('fs');
     const path = await import('path');
     
     const fullPath = path.join(process.cwd(), 'public', imagePath);
-    //console.log(`📁 Full path: ${fullPath}`);
     
-    // Debug: list files in public
-    const publicDir = path.join(process.cwd(), 'public');
-    if (fs.existsSync(publicDir)) {
-      const files = fs.readdirSync(publicDir);
-      //console.log(`📂 Files in public:`, files);
-    }
-    
-    // Check if file exists
     if (!fs.existsSync(fullPath)) {
-     // console.log(`❌ Image not found at: ${fullPath}`);
+      console.warn(`⚠️ Image not found: ${fullPath}, using fallback`);
       return generateFallbackLogo();
     }
     
-    // Read the file
     const imageBuffer = fs.readFileSync(fullPath);
-   // console.log(`✅ Image loaded successfully, size: ${imageBuffer.length} bytes`);
-    
-    // Get MIME type
     const extension = imagePath.split('.').pop()?.toLowerCase();
     let mimeType = 'image/png';
     
@@ -286,10 +422,7 @@ async function getImageAsBase64(imagePath: string): Promise<string> {
         break;
     }
     
-    // Convert to base64
     const base64 = imageBuffer.toString('base64');
-    //(`📊 Base64 length: ${base64.length}, MIME: ${mimeType}`);
-    
     return `data:${mimeType};base64,${base64}`;
     
   } catch (error) {
@@ -298,21 +431,6 @@ async function getImageAsBase64(imagePath: string): Promise<string> {
   }
 }
 
-function getMimeType(extension?: string): string {
-  switch (extension) {
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'png':
-      return 'image/png';
-    case 'svg':
-      return 'image/svg+xml';
-    case 'webp':
-      return 'image/webp';
-    default:
-      return 'image/png';
-  }
-}
 function generateFallbackLogo(): string {
   const logoSvg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="120" height="60" viewBox="0 0 120 60">
@@ -332,31 +450,18 @@ function generateFallbackLogo(): string {
   return `data:image/svg+xml;base64,${base64Logo}`;
 }
 
-// 🆕 ENHANCED: Function to generate watermark
-function generateWatermarkSvg(text: string = 'CLÍNICA DENTAL'): string {
-  const watermarkSvg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 400 100">
-      <text x="200" y="50" 
-            font-family="Arial, sans-serif" 
-            font-size="24" 
-            font-weight="bold" 
-            fill="#2563eb" 
-            fill-opacity="0.1" 
-            text-anchor="middle" 
-            dominant-baseline="middle"
-            transform="rotate(-45 200 50)">
-        ${text}
-      </text>
-    </svg>
-  `;
-  
-  const base64Watermark = Buffer.from(watermarkSvg).toString('base64');
-  return `data:image/svg+xml;base64,${base64Watermark}`;
-}
 export async function GET() {
   try {
-    //console.log('🏥 Testing Puppeteer on Vercel...');
-    
+    if (!isAdminSDKConfigured()) {
+      return NextResponse.json({
+        status: 'error',
+        error: 'Admin SDK not configured',
+        platform: 'server',
+        timestamp: new Date().toISOString()
+      }, { status: 503 });
+    }
+
+    // Test basic functionality
     const browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath(),
@@ -364,12 +469,13 @@ export async function GET() {
     });
     
     const page = await browser.newPage();
-    await page.setContent('<h1>Test</h1>');
+    await page.setContent('<h1>PDF Service Test</h1>');
     await browser.close();
     
     return NextResponse.json({
       status: 'healthy',
       puppeteer: 'working',
+      adminSDK: 'configured',
       platform: 'vercel',
       timestamp: new Date().toISOString()
     });
@@ -384,19 +490,11 @@ export async function GET() {
     }, { status: 500 });
   }
 }
-async function generateInvoiceHTML({
-  report,
-  patient,
-  doctor
-}: {
-  report: any;
-  patient: any;
-  doctor: any;
-    }): Promise<string> {
-    // console.log('🏥 Clinic Config Debug:');
-  //console.log('- showLogo:', clinicConfig.pdf.showLogo);
-  //console.log('- logoPath:', clinicConfig.branding.logoPath);
-  //console.log('- primaryColor:', clinicConfig.branding.primaryColor);
+
+// Enhanced HTML generation with proper type safety
+async function generateInvoiceHTML(data: PDFGenerationData): Promise<string> {
+  const { report, patient, doctor } = data;
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('es-MX', {
       style: 'currency',
@@ -407,7 +505,23 @@ async function generateInvoiceHTML({
 
   const formatDate = (date: any) => {
     if (!date) return 'N/A';
-    const jsDate = date.toDate ? date.toDate() : new Date(date);
+    // Handle both Firebase Timestamp and regular dates
+    let jsDate: Date;
+    if (date && typeof date.toDate === 'function') {
+      jsDate = date.toDate();
+    } else if (date && typeof date.seconds === 'number') {
+      jsDate = new Date(date.seconds * 1000);
+    } else if (date instanceof Date) {
+      jsDate = date;
+    } else {
+      jsDate = new Date(date);
+    }
+    
+    // Validate date
+    if (isNaN(jsDate.getTime())) {
+      return 'N/A';
+    }
+    
     return jsDate.toLocaleDateString('es-MX', {
       year: 'numeric',
       month: 'long',
@@ -440,65 +554,49 @@ async function generateInvoiceHTML({
     return labels[method] || method;
   };
 
-  // 🆕 NEW: Get logo and flexible watermark using clinic config
- let logoBase64 = '';
+  // Get logo and watermark
+  let logoBase64 = '';
   if (clinicConfig.pdf.showLogo) {
     const logoPath = clinicConfig.branding.logoPath || 'logo.png';
-    //console.log(`🖼️  Loading logo from: ${logoPath}`);
     logoBase64 = await getImageAsBase64(logoPath);
-    
-    if (logoBase64.includes('data:image/svg+xml')) {
-      //console.log('⚠️  Using fallback SVG logo - real image failed to load');
-    } else {
-      //console.log('✅ Real logo loaded successfully');
-    }
-  } else {
-   // console.log('🚫 Logo disabled in clinic config');
-  }  
-  // 🆕 ENHANCED: Flexible watermark system
+  }
+  
   let watermarkBase64 = '';
   if (clinicConfig.pdf.showWatermark) {
     const watermarkConfig = clinicConfig.pdf.watermark;
     
-    switch (watermarkConfig.type) {
-      case 'image':
-        // Image only - no text
-        watermarkBase64 = await watermarkPresets.imageOnly(watermarkConfig.imagePath);
-        break;
-        
-      case 'text':
-        // Text only - no image
-        watermarkBase64 = await watermarkPresets.textOnly(
-          watermarkConfig.text || clinicConfig.branding.watermarkText
-        );
-        break;
-        
-      case 'both':
-        // Both image and text
-        watermarkBase64 = await watermarkPresets.combined(
-          watermarkConfig.imagePath,
-          watermarkConfig.text || clinicConfig.branding.watermarkText
-        );
-        break;
-        
-      case 'none':
-        // No watermark
-        watermarkBase64 = '';
-        break;
-        
-      case 'auto':
-      default:
-        // Smart detection - use what's available
-        watermarkBase64 = await watermarkPresets.smart();
-        break;
+    try {
+      switch (watermarkConfig.type) {
+        case 'image':
+          watermarkBase64 = await watermarkPresets.imageOnly(watermarkConfig.imagePath);
+          break;
+        case 'text':
+          watermarkBase64 = await watermarkPresets.textOnly(
+            watermarkConfig.text || clinicConfig.branding.watermarkText
+          );
+          break;
+        case 'both':
+          watermarkBase64 = await watermarkPresets.combined(
+            watermarkConfig.imagePath,
+            watermarkConfig.text || clinicConfig.branding.watermarkText
+          );
+          break;
+        case 'auto':
+        default:
+          watermarkBase64 = await watermarkPresets.smart();
+          break;
+      }
+    } catch (watermarkError) {
+      console.warn('⚠️ Watermark generation failed:', watermarkError);
+      // Continue without watermark
     }
   }
 
-  // 🆕 NEW: Extract clinic information from config
   const clinicInfo = clinicConfig;
   const showSecurityStrip = clinicConfig.pdf.showSecurityStrip;
   const showQRCode = clinicConfig.pdf.showQRCode;
 
+  // Your existing HTML template with proper escaping and null checks
   return `
     <!DOCTYPE html>
     <html lang="es">
@@ -522,7 +620,6 @@ async function generateInvoiceHTML({
         }
 
         ${watermarkBase64 ? `
-        /* 🆕 NEW: Watermark background */
         body::before {
           content: '';
           position: fixed;
@@ -549,7 +646,6 @@ async function generateInvoiceHTML({
           z-index: 1;
         }
 
-        /* 🆕 ENHANCED: Header with clinic branding */
         .header {
           display: flex;
           justify-content: space-between;
@@ -566,7 +662,6 @@ async function generateInvoiceHTML({
           gap: 20px;
         }
 
-        /* 🆕 NEW: Logo styles */
         .logo-container {
           flex-shrink: 0;
         }
@@ -619,7 +714,6 @@ async function generateInvoiceHTML({
           font-size: 14px;
         }
 
-        /* Status Badge */
         .status-badge {
           display: inline-block;
           padding: 6px 16px;
@@ -638,7 +732,6 @@ async function generateInvoiceHTML({
         .status-overdue { background: #fee2e2; color: #dc2626; }
 
         ${showSecurityStrip ? `
-        /* 🆕 NEW: Security elements */
         .security-strip {
           position: absolute;
           top: 0;
@@ -661,7 +754,6 @@ async function generateInvoiceHTML({
           font-family: monospace;
         }
 
-        /* Billing Information */
         .billing-section {
           display: flex;
           justify-content: space-between;
@@ -694,7 +786,6 @@ async function generateInvoiceHTML({
           font-size: 16px;
         }
 
-        /* Services Table */
         .services-section {
           margin-bottom: 40px;
         }
@@ -747,7 +838,6 @@ async function generateInvoiceHTML({
           font-weight: 600;
         }
 
-        /* Financial Summary */
         .financial-summary {
           margin-top: 40px;
           border-top: 2px solid #e5e7eb;
@@ -801,7 +891,6 @@ async function generateInvoiceHTML({
           padding-top: 8px;
         }
 
-        /* Payments Section */
         .payments-section {
           margin-top: 40px;
         }
@@ -833,7 +922,6 @@ async function generateInvoiceHTML({
           font-weight: 600;
         }
 
-        /* Notes Section */
         .notes-section {
           margin-top: 40px;
           padding: 20px;
@@ -854,7 +942,6 @@ async function generateInvoiceHTML({
           line-height: 1.6;
         }
 
-        /* 🆕 ENHANCED: Footer with branding */
         .footer {
           margin-top: 60px;
           padding-top: 20px;
@@ -889,13 +976,11 @@ async function generateInvoiceHTML({
         }
         ` : ''}
 
-        /* Print Styles */
         @media print {
           body { -webkit-print-color-adjust: exact; }
           .invoice-container { margin: 0; padding: 15px; }
         }
 
-        /* No Services Message */
         .no-services {
           text-align: center;
           padding: 40px 20px;
@@ -906,10 +991,8 @@ async function generateInvoiceHTML({
     </head>
     <body>
       <div class="invoice-container">
-        <!-- 🆕 NEW: Security strip (conditional) -->
         ${showSecurityStrip ? '<div class="security-strip"></div>' : ''}
         
-        <!-- 🆕 ENHANCED: Header with clinic configuration -->
         <div class="header">
           <div class="practice-info">
             ${logoBase64 ? `
@@ -942,14 +1025,13 @@ async function generateInvoiceHTML({
           </div>
         </div>
 
-        <!-- Billing Information -->
         <div class="billing-section">
           <div class="billing-info">
             <div class="section-title">Facturar a:</div>
-            <div class="patient-name">${patient.firstName} ${patient.lastName}</div>
+            <div class="patient-name">${patient.fullName}</div>
             <div class="info-block">${patient.email}</div>
             <div class="info-block">${patient.phone}</div>
-            ${patient.address ? `
+            ${patient.address && patient.address.street ? `
               <div class="info-block">
                 ${patient.address.street}<br>
                 ${patient.address.city}, ${patient.address.state}<br>
@@ -959,8 +1041,8 @@ async function generateInvoiceHTML({
           </div>
           <div class="billing-info">
             <div class="section-title">Doctor/Tratante:</div>
-            <div class="info-block"><strong>Dr. ${doctor.displayName || 'Doctor'}</strong></div>
-            <div class="info-block">${doctor.email || ''}</div>
+            <div class="info-block"><strong>Dr. ${doctor.displayName}</strong></div>
+            <div class="info-block">${doctor.email}</div>
             ${report.dueDate ? `
               <div class="info-block" style="margin-top: 15px;">
                 <strong>Fecha de Vencimiento:</strong><br>
@@ -970,7 +1052,6 @@ async function generateInvoiceHTML({
           </div>
         </div>
 
-        <!-- Services -->
         <div class="services-section">
           <div class="section-title">Servicios Prestados</div>
           ${report.services && report.services.length > 0 ? `
@@ -984,20 +1065,20 @@ async function generateInvoiceHTML({
                 </tr>
               </thead>
               <tbody>
-                ${report.services.map((service: any) => `
+                ${report.services.map((service: BillingService) => `
                   <tr>
                     <td>
-                      <div class="service-description">${service.description}</div>
+                      <div class="service-description">${service.description || 'Servicio'}</div>
                       ${service.procedureCode || service.tooth?.length ? `
                         <div class="service-details">
                           ${service.procedureCode ? `Código: ${service.procedureCode}` : ''}
-                          ${service.tooth?.length ? ` | Dientes: ${service.tooth.join(', ')}` : ''}
+                          ${service.tooth && service.tooth.length ? ` | Dientes: ${service.tooth.join(', ')}` : ''}
                         </div>
                       ` : ''}
                     </td>
-                    <td class="quantity-cell">${service.quantity}</td>
-                    <td class="price-cell">${formatCurrency(service.unitPrice)}</td>
-                    <td class="total-cell">${formatCurrency(service.total)}</td>
+                    <td class="quantity-cell">${service.quantity || 1}</td>
+                    <td class="price-cell">${formatCurrency(service.unitPrice || 0)}</td>
+                    <td class="total-cell">${formatCurrency(service.total || 0)}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -1009,7 +1090,6 @@ async function generateInvoiceHTML({
           `}
         </div>
 
-        <!-- Financial Summary -->
         <div class="financial-summary">
           <div class="summary-table">
             <div class="summary-row subtotal">
@@ -1043,7 +1123,6 @@ async function generateInvoiceHTML({
           </div>
         </div>
 
-        <!-- Payments -->
         ${report.payments && report.payments.length > 0 ? `
           <div class="payments-section">
             <div class="section-title">Historial de Pagos</div>
@@ -1057,7 +1136,7 @@ async function generateInvoiceHTML({
                 </tr>
               </thead>
               <tbody>
-                ${report.payments.map((payment: any) => `
+                ${report.payments.map((payment: BillingPayment) => `
                   <tr>
                     <td>${formatDate(payment.date)}</td>
                     <td>${getPaymentMethodLabel(payment.method)}</td>
@@ -1072,7 +1151,6 @@ async function generateInvoiceHTML({
           </div>
         ` : ''}
 
-        <!-- Notes -->
         ${report.notes ? `
           <div class="notes-section">
             <div class="notes-title">Notas y Observaciones:</div>
@@ -1080,7 +1158,6 @@ async function generateInvoiceHTML({
           </div>
         ` : ''}
 
-        <!-- 🆕 ENHANCED: Footer with clinic configuration -->
         <div class="footer">
           <div class="footer-brand">${clinicInfo.fullName}</div>
           <div>${clinicInfo.pdf.footerText || 'Gracias por confiar en nuestros servicios'}</div>
@@ -1090,7 +1167,6 @@ async function generateInvoiceHTML({
             Este documento es válido únicamente con sello y firma digital
           </div>
           
-          <!-- 🆕 NEW: QR Code placeholder (conditional) -->
           ${showQRCode ? `
           <div class="footer-qr">
             QR<br>
@@ -1099,7 +1175,6 @@ async function generateInvoiceHTML({
           ` : ''}
         </div>
 
-        <!-- 🆕 NEW: Document ID for tracking -->
         <div class="document-id">
           DOC-ID: ${report.id?.toUpperCase()}-${Date.now().toString().slice(-6)}
         </div>
