@@ -232,43 +232,68 @@ async function generateBillingPDF({
 
 // 🆕 ENHANCED: Function to convert image to base64
 // Vercel-optimized image loading
+// Replace your getImageAsBase64 function with this debug version temporarily
+async function debugClinicConfig() {
+  console.log('🏥 Clinic Config Debug:');
+  console.log('PDF showLogo:', clinicConfig.pdf?.showLogo);
+  console.log('Branding logoPath:', clinicConfig.branding?.logoPath);
+  console.log('Full clinic config:', JSON.stringify(clinicConfig, null, 2));
+}
 async function getImageAsBase64(imagePath: string): Promise<string> {
+  console.log(`🖼️  Loading image: ${imagePath}`);
+  
   try {
-    if (process.env.VERCEL_URL) {
-      const imageUrl = `https://${process.env.VERCEL_URL}/${imagePath}`;
-      const response = await fetch(imageUrl);
-      
-      if (response.ok) {
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const extension = imagePath.split('.').pop()?.toLowerCase();
-        const mimeType = getMimeType(extension);
-        const base64 = buffer.toString('base64');
-        return `data:${mimeType};base64,${base64}`;
-      }
-    } else {
-      // Local development - try to read from filesystem
-      try {
-        const fs = await import('fs');
-        const path = await import('path');
-        const fullPath = path.join(process.cwd(), 'public', imagePath);
-        
-        if (fs.existsSync(fullPath)) {
-          const imageBuffer = fs.readFileSync(fullPath);
-          const extension = imagePath.split('.').pop()?.toLowerCase();
-          const mimeType = getMimeType(extension);
-          const base64 = imageBuffer.toString('base64');
-          return `data:${mimeType};base64,${base64}`;
-        }
-      } catch (fsError) {
-        console.warn('Could not read image from filesystem:', fsError);
-      }
+    const fs = await import('fs');
+    const path = await import('path');
+    
+    const fullPath = path.join(process.cwd(), 'public', imagePath);
+    console.log(`📁 Full path: ${fullPath}`);
+    
+    // Debug: list files in public
+    const publicDir = path.join(process.cwd(), 'public');
+    if (fs.existsSync(publicDir)) {
+      const files = fs.readdirSync(publicDir);
+      console.log(`📂 Files in public:`, files);
     }
     
-    return generateFallbackLogo();
+    // Check if file exists
+    if (!fs.existsSync(fullPath)) {
+      console.log(`❌ Image not found at: ${fullPath}`);
+      return generateFallbackLogo();
+    }
+    
+    // Read the file
+    const imageBuffer = fs.readFileSync(fullPath);
+    console.log(`✅ Image loaded successfully, size: ${imageBuffer.length} bytes`);
+    
+    // Get MIME type
+    const extension = imagePath.split('.').pop()?.toLowerCase();
+    let mimeType = 'image/png';
+    
+    switch (extension) {
+      case 'jpg':
+      case 'jpeg':
+        mimeType = 'image/jpeg';
+        break;
+      case 'png':
+        mimeType = 'image/png';
+        break;
+      case 'svg':
+        mimeType = 'image/svg+xml';
+        break;
+      case 'webp':
+        mimeType = 'image/webp';
+        break;
+    }
+    
+    // Convert to base64
+    const base64 = imageBuffer.toString('base64');
+    console.log(`📊 Base64 length: ${base64.length}, MIME: ${mimeType}`);
+    
+    return `data:${mimeType};base64,${base64}`;
     
   } catch (error) {
-    console.warn('Image loading failed, using fallback:', error);
+    console.error('❌ Error loading image:', error);
     return generateFallbackLogo();
   }
 }
@@ -367,7 +392,11 @@ async function generateInvoiceHTML({
   report: any;
   patient: any;
   doctor: any;
-}): Promise<string> {
+    }): Promise<string> {
+     console.log('🏥 Clinic Config Debug:');
+  console.log('- showLogo:', clinicConfig.pdf.showLogo);
+  console.log('- logoPath:', clinicConfig.branding.logoPath);
+  console.log('- primaryColor:', clinicConfig.branding.primaryColor);
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('es-MX', {
       style: 'currency',
@@ -412,8 +441,20 @@ async function generateInvoiceHTML({
   };
 
   // 🆕 NEW: Get logo and flexible watermark using clinic config
-  const logoBase64 = clinicConfig.pdf.showLogo ? await getImageAsBase64(clinicConfig.branding.logoPath || 'logo.png') : '';
-  
+ let logoBase64 = '';
+  if (clinicConfig.pdf.showLogo) {
+    const logoPath = clinicConfig.branding.logoPath || 'logo.png';
+    console.log(`🖼️  Loading logo from: ${logoPath}`);
+    logoBase64 = await getImageAsBase64(logoPath);
+    
+    if (logoBase64.includes('data:image/svg+xml')) {
+      console.log('⚠️  Using fallback SVG logo - real image failed to load');
+    } else {
+      console.log('✅ Real logo loaded successfully');
+    }
+  } else {
+    console.log('🚫 Logo disabled in clinic config');
+  }  
   // 🆕 ENHANCED: Flexible watermark system
   let watermarkBase64 = '';
   if (clinicConfig.pdf.showWatermark) {
