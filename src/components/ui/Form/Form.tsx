@@ -17,9 +17,18 @@ import {
   MapPin,
   Heart,
 } from "lucide-react";
+import {
+  PublicDoctor,
+  PublicAppointment,
+  BookingDataResponse,
+  SubmissionResponse,
+  convertToCalendarAppointment,
+  MinimalAppointment,
+} from "@/types/public-booking";
 import { addPatient, getAppointments } from "@/lib/firebase/db";
 import { getAllUsers, UserProfile } from "@/lib/firebase/rbac";
 import { Timestamp } from "firebase/firestore";
+import { Appointment } from "@/lib/firebase/db";
 import {
   validateEmail,
   validateName,
@@ -229,8 +238,10 @@ const ResponsiveAppointmentForm: React.FC = () => {
   const [showCalendarPicker, setShowCalendarPicker] = useState(false);
 
   // Data states
-  const [doctors, setDoctors] = useState<UserProfile[]>([]);
-  const [allAppointments, setAllAppointments] = useState<any[]>([]);
+  const [doctors, setDoctors] = useState<PublicDoctor[]>([]);
+  const [allAppointments, setAllAppointments] = useState<PublicAppointment[]>(
+    []
+  );
   const [loadingData, setLoadingData] = useState(true);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -242,14 +253,6 @@ const ResponsiveAppointmentForm: React.FC = () => {
       try {
         setLoadingData(true);
 
-        // Load doctors
-        const allUsers = await getAllUsers();
-        const activeDoctors = allUsers.filter(
-          (user) => user.role === "doctor" && user.isActive
-        );
-        setDoctors(activeDoctors);
-
-        // Load all appointments for next day only (for smart scheduling)
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         tomorrow.setHours(0, 0, 0, 0);
@@ -257,10 +260,25 @@ const ResponsiveAppointmentForm: React.FC = () => {
         const dayAfterTomorrow = new Date(tomorrow);
         dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 1);
 
-        const appointments = await getAppointments(tomorrow, dayAfterTomorrow);
-        setAllAppointments(appointments);
+        const response = await fetch(
+          `/api/public/booking-data?startDate=${tomorrow.toISOString()}&endDate=${dayAfterTomorrow.toISOString()}`
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch booking data");
+        }
+
+        const data: BookingDataResponse = await response.json();
+
+        if (data.success) {
+          setDoctors(data.doctors);
+          setAllAppointments(data.appointments);
+        } else {
+          throw new Error(data.error || "Failed to load data");
+        }
       } catch (error) {
         console.error("Error loading data:", error);
+        setError("Error cargando información. Intenta recargar la página.");
       } finally {
         setLoadingData(false);
       }
@@ -291,7 +309,9 @@ const ResponsiveAppointmentForm: React.FC = () => {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
+  const calendarAppointments: Appointment[] = allAppointments
+    .filter((apt) => apt.doctorId === formData.doctorId)
+    .map((apt) => convertToCalendarAppointment(apt) as Appointment);
   // Validation
   const validateCurrentQuestion = (): string | null => {
     const currentQ = questions[currentQuestion];
@@ -459,91 +479,33 @@ const ResponsiveAppointmentForm: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      const [firstName, ...lastNameParts] = formData.name.split(" ");
-      const lastName = lastNameParts.join(" ") || "";
-
-      const selectedProcedure = DENTAL_PROCEDURES.find(
-        (p) => p.id === formData.procedure
-      );
-
-      const patientData = {
-        firstName,
-        lastName,
-        fullName: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        dateOfBirth: Timestamp.fromDate(new Date(1990, 0, 1)),
-        gender: "prefer_not_to_say" as const,
-
-        address: {
-          street: "",
-          city: "Zapopan",
-          state: "Jalisco",
-          zipCode: "",
-          country: "México",
+      const response = await fetch("/api/public/submit-appointment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
+          procedure: formData.procedure,
+          doctorId: formData.doctorId,
+          selectedDate: formData.selectedDate.toISOString(),
+          selectedTime: formData.selectedTime,
+        }),
+      });
 
-        emergencyContact: {
-          name: "",
-          relationship: "",
-          phone: "",
-        },
+      const result: SubmissionResponse = await response.json();
 
-        insurance: { isActive: false },
-
-        medicalHistory: {
-          allergies: [],
-          medications: [],
-          medicalConditions: [],
-          surgeries: [],
-        },
-
-        dentalHistory: {
-          reasonForVisit: selectedProcedure?.name || formData.procedure,
-          oralHygiene: "good" as const,
-          brushingFrequency: "twice_daily" as const,
-          flossingFrequency: "daily" as const,
-          currentProblems: [],
-        },
-
-        status: "scheduled" as const,
-
-        preferences: {
-          preferredTimeSlots: [formData.selectedTime],
-          preferredDays: [],
-          communicationMethod: "phone" as const,
-          reminderPreferences: {
-            email: true,
-            sms: true,
-            days: 1,
-          },
-        },
-
-        financial: {
-          paymentMethod: "cash" as const,
-          balance: 0,
-        },
-
-        createdBy: "agenda_form",
-        notes: `Solicitud de cita desde formulario web. Procedimiento: ${
-          selectedProcedure?.name || formData.procedure
-        }. Fecha solicitada: ${formData.selectedDate.toLocaleDateString()} a las ${
-          formData.selectedTime
-        }. Doctor preferido: ${
-          doctors.find((d) => d.uid === formData.doctorId)?.displayName ||
-          "No especificado"
-        }`,
-        statusHistory: [],
-
-        consents: {
-          treatmentConsent: true,
-          privacyPolicy: true,
-          marketingEmails: false,
-        },
-      };
-
-      await addPatient(patientData);
-      setIsSubmitted(true);
+      if (result.success) {
+        localStorage.setItem(
+          "bookingConfirmation",
+          JSON.stringify(result.data)
+        );
+        setIsSubmitted(true);
+      } else {
+        throw new Error(result.error || "Failed to submit appointment");
+      }
     } catch (err) {
       console.error("Error submitting appointment request:", err);
       setError("Error al enviar solicitud. Intenta de nuevo.");
@@ -1059,12 +1021,10 @@ const ResponsiveAppointmentForm: React.FC = () => {
           isOpen={showCalendarPicker}
           onClose={() => setShowCalendarPicker(false)}
           onSelectDateTime={handleCalendarSelection}
-          appointments={allAppointments.filter(
-            (apt) => apt.doctorId === formData.doctorId
-          )}
-          patients={[]} // Not needed for this use case
+          appointments={calendarAppointments} // Use the converted appointments here
+          patients={[]}
           selectedDoctor={formData.doctorId}
-          appointmentDuration={60} // Force 1 hour duration for agenda form
+          appointmentDuration={60}
           initialDate={(() => {
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
