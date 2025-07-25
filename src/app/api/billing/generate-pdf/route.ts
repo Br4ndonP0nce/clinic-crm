@@ -1,11 +1,13 @@
 // src/app/api/billing/generate-pdf/route.ts - ENHANCED WITH LOGO AND WATERMARK
 import { NextRequest, NextResponse } from 'next/server';
-import puppeteer from 'puppeteer';
+import chromium from '@sparticuz/chromium';
+import puppeteer from 'puppeteer-core';
 import { getBillingReport } from '@/lib/firebase/billing';
 import { getPatient } from '@/lib/firebase/db';
 import { getUserProfile } from '@/lib/firebase/rbac';
 import { watermarkPresets } from '@/lib/utils/watermark';
 import { clinicConfig } from '@/config/clinic';
+export const maxDuration = 30; // Vercel function timeout
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,8 +49,7 @@ export async function POST(request: NextRequest) {
       doctor: doctor || { displayName: 'Doctor', email: '' }
     });
 
-    // Return PDF as response
-    const response = new Response(Uint8Array.from(pdfBuffer), {
+    return new Response(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
@@ -57,15 +58,37 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return response;
-
   } catch (error) {
     console.error('Error generating PDF:', error);
+    
+    const errorDetails = {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+      environment: getEnvironmentInfo()
+    };
+    
+    console.error('PDF Generation Error:', errorDetails);
+
     return NextResponse.json(
-      { error: 'Failed to generate PDF' },
+      { 
+        error: 'Failed to generate PDF',
+        details: process.env.NODE_ENV === 'development' ? errorDetails.message : undefined
+      },
       { status: 500 }
     );
   }
+}
+
+function getEnvironmentInfo() {
+  return {
+    NODE_ENV: process.env.NODE_ENV,
+    VERCEL: process.env.VERCEL,
+    VERCEL_ENV: process.env.VERCEL_ENV,
+    platform: process.platform,
+    isLocal: !process.env.VERCEL && !process.env.RAILWAY && !process.env.RENDER,
+    isVercel: !!process.env.VERCEL,
+    isDev: process.env.NODE_ENV === 'development'
+  };
 }
 
 async function generateBillingPDF({
@@ -78,30 +101,110 @@ async function generateBillingPDF({
   doctor: any;
 }): Promise<Buffer> {
   
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
-
+  const env = getEnvironmentInfo();
+  console.log('🔍 Environment detected:', env);
+  
+  let browser = null;
+  
   try {
+    if (env.isVercel) {
+      // VERCEL: Use serverless chromium
+      console.log('🚀 Launching browser on Vercel...');
+      
+      const chromium = await import('@sparticuz/chromium');
+      const puppeteer = await import('puppeteer-core');
+      
+      browser = await puppeteer.default.launch({
+        args: chromium.default.args,
+        executablePath: await chromium.default.executablePath(),
+        headless: true
+      });
+      
+    } else {
+      // LOCAL/OTHER: Use regular puppeteer
+      console.log('💻 Launching browser locally...');
+      
+      try {
+        // Try to use regular puppeteer first
+        const puppeteer = await import('puppeteer');
+        browser = await puppeteer.default.launch({
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage'
+          ]
+        });
+      } catch (localPuppeteerError) {
+        console.log('📦 Regular puppeteer not found, trying puppeteer-core...');
+        
+        // Fallback: try to find local chromium
+        const puppeteer = await import('puppeteer-core');
+        
+        // Common local chromium paths
+        const possiblePaths = [
+          // Windows
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+          // macOS
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          '/Applications/Chromium.app/Contents/MacOS/Chromium',
+          // Linux
+          '/usr/bin/google-chrome',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+          // Snap
+          '/snap/bin/chromium'
+        ];
+        
+        let executablePath = undefined;
+        for (const path of possiblePaths) {
+          try {
+            const fs = await import('fs');
+            if (fs.existsSync(path)) {
+              executablePath = path;
+              console.log(`✅ Found Chrome/Chromium at: ${path}`);
+              break;
+            }
+          } catch (e) {
+            // Continue searching
+          }
+        }
+        
+        if (!executablePath) {
+          throw new Error('❌ No Chromium/Chrome installation found. Please install:\n' +
+            '- npm install puppeteer (for development), OR\n' +
+            '- Install Google Chrome/Chromium browser');
+        }
+        
+        browser = await puppeteer.default.launch({
+          executablePath,
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage'
+          ]
+        });
+      }
+    }
+
+    console.log('✅ Browser launched successfully');
+
     const page = await browser.newPage();
-    
-    // Set viewport for better rendering
     await page.setViewport({ width: 1200, height: 1600 });
+    page.setDefaultTimeout(25000);
 
-    // Generate the HTML content with images
-    const htmlContent = await generateInvoiceHTML({
-      report,
-      patient,
-      doctor
-    });
+    console.log('📄 Generating HTML content...');
+    const htmlContent = await generateInvoiceHTML({ report, patient, doctor });
 
-    // Set the HTML content
+    console.log('🔧 Setting page content...');
     await page.setContent(htmlContent, {
-      waitUntil: 'networkidle0'
+      waitUntil: 'domcontentloaded',
+      timeout: 20000
     });
 
-    // Generate PDF
+    console.log('📋 Generating PDF...');
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
@@ -113,63 +216,95 @@ async function generateBillingPDF({
       }
     });
 
+    console.log('✅ PDF generated successfully');
     return Buffer.from(pdfBuffer);
 
+  } catch (error) {
+    console.error('❌ Error in PDF generation:', error);
+    throw new Error(`PDF generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   } finally {
-    await browser.close();
+    if (browser) {
+      console.log('🔒 Closing browser...');
+      await browser.close();
+    }
   }
 }
 
 // 🆕 ENHANCED: Function to convert image to base64
+// Vercel-optimized image loading
 async function getImageAsBase64(imagePath: string): Promise<string> {
   try {
-    const { readFileSync } = await import('fs');
-    const { join } = await import('path');
-    
-    // Try to read from public folder
-    const fullPath = join(process.cwd(), 'public', imagePath);
-    const imageBuffer = readFileSync(fullPath);
-    
-    // Determine MIME type
-    const extension = imagePath.split('.').pop()?.toLowerCase();
-    let mimeType = 'image/png';
-    
-    switch (extension) {
-      case 'jpg':
-      case 'jpeg':
-        mimeType = 'image/jpeg';
-        break;
-      case 'png':
-        mimeType = 'image/png';
-        break;
-      case 'svg':
-        mimeType = 'image/svg+xml';
-        break;
-      case 'webp':
-        mimeType = 'image/webp';
-        break;
+    if (process.env.VERCEL_URL) {
+      const imageUrl = `https://${process.env.VERCEL_URL}/${imagePath}`;
+      const response = await fetch(imageUrl);
+      
+      if (response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const extension = imagePath.split('.').pop()?.toLowerCase();
+        const mimeType = getMimeType(extension);
+        const base64 = buffer.toString('base64');
+        return `data:${mimeType};base64,${base64}`;
+      }
+    } else {
+      // Local development - try to read from filesystem
+      try {
+        const fs = await import('fs');
+        const path = await import('path');
+        const fullPath = path.join(process.cwd(), 'public', imagePath);
+        
+        if (fs.existsSync(fullPath)) {
+          const imageBuffer = fs.readFileSync(fullPath);
+          const extension = imagePath.split('.').pop()?.toLowerCase();
+          const mimeType = getMimeType(extension);
+          const base64 = imageBuffer.toString('base64');
+          return `data:${mimeType};base64,${base64}`;
+        }
+      } catch (fsError) {
+        console.warn('Could not read image from filesystem:', fsError);
+      }
     }
     
-    const base64 = imageBuffer.toString('base64');
-    return `data:${mimeType};base64,${base64}`;
+    return generateFallbackLogo();
     
   } catch (error) {
-    console.error('Error loading image:', error);
-    
-    // Return fallback SVG logo using clinic config
-    const logoSvg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="120" height="60" viewBox="0 0 120 60">
-        <rect width="120" height="60" fill="${clinicConfig.branding.primaryColor}" rx="8"/>
-        <text x="60" y="25" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="white" text-anchor="middle">${clinicConfig.name.split(' ')[0]}</text>
-        <text x="60" y="40" font-family="Arial, sans-serif" font-size="12" fill="white" text-anchor="middle">${clinicConfig.name.split(' ').slice(1).join(' ')}</text>
-        <circle cx="25" cy="30" r="8" fill="white" opacity="0.8"/>
-        <circle cx="95" cy="30" r="8" fill="white" opacity="0.8"/>
-      </svg>
-    `;
-    
-    const base64Logo = Buffer.from(logoSvg).toString('base64');
-    return `data:image/svg+xml;base64,${base64Logo}`;
+    console.warn('Image loading failed, using fallback:', error);
+    return generateFallbackLogo();
   }
+}
+
+function getMimeType(extension?: string): string {
+  switch (extension) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'svg':
+      return 'image/svg+xml';
+    case 'webp':
+      return 'image/webp';
+    default:
+      return 'image/png';
+  }
+}
+function generateFallbackLogo(): string {
+  const logoSvg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="120" height="60" viewBox="0 0 120 60">
+      <rect width="120" height="60" fill="${clinicConfig.branding.primaryColor}" rx="8"/>
+      <text x="60" y="25" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="white" text-anchor="middle">
+        ${clinicConfig.name.split(' ')[0] || 'CLÍNICA'}
+      </text>
+      <text x="60" y="40" font-family="Arial, sans-serif" font-size="12" fill="white" text-anchor="middle">
+        ${clinicConfig.name.split(' ').slice(1).join(' ') || 'DENTAL'}
+      </text>
+      <circle cx="25" cy="30" r="8" fill="white" opacity="0.8"/>
+      <circle cx="95" cy="30" r="8" fill="white" opacity="0.8"/>
+    </svg>
+  `;
+  
+  const base64Logo = Buffer.from(logoSvg).toString('base64');
+  return `data:image/svg+xml;base64,${base64Logo}`;
 }
 
 // 🆕 ENHANCED: Function to generate watermark
@@ -193,7 +328,37 @@ function generateWatermarkSvg(text: string = 'CLÍNICA DENTAL'): string {
   const base64Watermark = Buffer.from(watermarkSvg).toString('base64');
   return `data:image/svg+xml;base64,${base64Watermark}`;
 }
-
+export async function GET() {
+  try {
+    console.log('🏥 Testing Puppeteer on Vercel...');
+    
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: true
+    });
+    
+    const page = await browser.newPage();
+    await page.setContent('<h1>Test</h1>');
+    await browser.close();
+    
+    return NextResponse.json({
+      status: 'healthy',
+      puppeteer: 'working',
+      platform: 'vercel',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Health check failed:', error);
+    
+    return NextResponse.json({
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      platform: 'vercel',
+      timestamp: new Date().toISOString()
+    }, { status: 500 });
+  }
+}
 async function generateInvoiceHTML({
   report,
   patient,
