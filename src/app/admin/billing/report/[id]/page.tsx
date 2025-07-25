@@ -1,4 +1,4 @@
-// src/app/admin/billing/report/[id]/page.tsx
+// src/app/admin/billing/report/[id]/page.tsx - UPDATED WITH PDF FUNCTIONALITY
 "use client";
 import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -68,8 +68,9 @@ import {
   BillingPaymentInput,
 } from "@/types/billing";
 import { getPaymentMethodLabel, PaymentMethod } from "@/types/sales";
+import { PDFButton, QuickPDFPreview } from "@/components/billing/PDFButton"; // 🆕 NEW IMPORT
 
-// Enhanced Payment Management Component
+// [Previous component code remains the same until the main component return statement...]
 const PaymentManager = ({
   report,
   onAddPayment,
@@ -499,7 +500,7 @@ const PaymentItem = ({
   </motion.div>
 );
 
-// Main Component
+// Main Component (updated with PDF integration)
 export default function BillingReportDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -565,12 +566,13 @@ export default function BillingReportDetailPage() {
     router.push("/admin/billing/");
   };
 
-  const handleGeneratePDF = () => {
-    console.log("Generate PDF for report:", reportId);
+  const handleSendEmail = () => {
+    // TODO: Implement email sending functionality
+    console.log("Send email for report:", reportId);
   };
 
-  const handleSendEmail = () => {
-    console.log("Send email for report:", reportId);
+  const handlePrint = () => {
+    window.print();
   };
 
   if (!canViewBilling) {
@@ -596,7 +598,6 @@ export default function BillingReportDetailPage() {
   if (loading) {
     return (
       <div className="p-6">
-        {/* Loading skeleton would go here */}
         <div className="flex justify-center items-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
         </div>
@@ -630,7 +631,7 @@ export default function BillingReportDetailPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
+      {/* Header - UPDATED with PDF functionality */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -661,6 +662,7 @@ export default function BillingReportDetailPage() {
           </div>
         </div>
 
+        {/* 🆕 UPDATED: Enhanced action buttons with PDF functionality */}
         <div className="flex items-center gap-2">
           {canManageBilling && (
             <Button variant="outline" onClick={handleEdit}>
@@ -669,17 +671,30 @@ export default function BillingReportDetailPage() {
             </Button>
           )}
 
+          {/* 🆕 NEW: PDF Button with dropdown options */}
+          {(report.status === "completed" ||
+            report.status === "paid" ||
+            report.status === "partially_paid") && (
+            <PDFButton report={report} variant="outline" showDropdown={true} />
+          )}
+
+          {/* 🆕 NEW: Quick PDF Preview for any status */}
+          {report.status !== "draft" && (
+            <QuickPDFPreview reportId={reportId} triggerClassName="h-10 w-10" />
+          )}
+
           {(report.status === "completed" ||
             report.status === "paid" ||
             report.status === "partially_paid") && (
             <>
-              <Button variant="outline" onClick={handleGeneratePDF}>
-                <Download className="h-4 w-4 mr-2" />
-                PDF
-              </Button>
               <Button variant="outline" onClick={handleSendEmail}>
                 <Mail className="h-4 w-4 mr-2" />
                 Enviar
+              </Button>
+
+              <Button variant="outline" onClick={handlePrint}>
+                <Printer className="h-4 w-4 mr-2" />
+                Imprimir
               </Button>
             </>
           )}
@@ -691,17 +706,62 @@ export default function BillingReportDetailPage() {
         </div>
       </motion.div>
 
-      {/* Main Content */}
+      {/* 🆕 NEW: PDF Status Indicator */}
+      {report.pdfGenerated && report.pdfUrl && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-green-50 border border-green-200 rounded-lg p-4"
+        >
+          <div className="flex items-center gap-3">
+            <CheckCircle className="h-5 w-5 text-green-600" />
+            <div className="flex-1">
+              <h4 className="font-medium text-green-800">PDF Generado</h4>
+              <p className="text-sm text-green-700">
+                Este reporte tiene un PDF generado previamente.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(report.pdfUrl, "_blank")}
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                Ver PDF
+              </Button>
+              <PDFButton
+                report={report}
+                variant="outline"
+                size="sm"
+                showDropdown={false}
+              />
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Main Content - Rest remains the same */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column - Services and Payments */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Services Section */}
+          {/* Services Section - ENHANCED with PDF preview */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center">
-                <FileText className="h-5 w-5 mr-2" />
-                Servicios Prestados ({report.services.length})
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center">
+                  <FileText className="h-5 w-5 mr-2" />
+                  Servicios Prestados ({report.services.length})
+                </CardTitle>
+                {report.services.length > 0 && report.status !== "draft" && (
+                  <PDFButton
+                    report={report}
+                    variant="ghost"
+                    size="sm"
+                    showDropdown={false}
+                  />
+                )}
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {report.services.length === 0 ? (
@@ -721,7 +781,7 @@ export default function BillingReportDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Payments Section */}
+          {/* Payments Section - keeping existing PaymentManager */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center">
@@ -770,16 +830,16 @@ export default function BillingReportDetailPage() {
           )}
         </div>
 
-        {/* Right Column - Summary and Actions */}
+        {/* Right Column - Summary and Actions (keep existing content) */}
         <div className="space-y-6">
-          {/* Status Management */}
+          {/* Status Management - keep existing */}
           <StatusManager
             report={report}
             onComplete={completeReport}
             canManage={canManageBilling}
           />
 
-          {/* Financial Summary */}
+          {/* Financial Summary - keep existing */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center">
@@ -788,6 +848,7 @@ export default function BillingReportDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
+              {/* Keep existing financial summary content... */}
               <div className="space-y-3">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Subtotal:</span>
@@ -1047,3 +1108,5 @@ export default function BillingReportDetailPage() {
     </div>
   );
 }
+
+// Keep all existing component definitions (PaymentManager, StatusManager, ServiceItem, PaymentItem)

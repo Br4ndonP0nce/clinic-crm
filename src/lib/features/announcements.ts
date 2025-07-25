@@ -69,7 +69,24 @@ export const FEATURE_ANNOUNCEMENTS: FeatureAnnouncement[] = [
  priority: 'medium',
  ctaText: 'Entendido',
  ctaUrl: ''
-}
+  },  {
+ id: 'pdf-report-gen',
+ title: 'NUEVO: Generacion automatica de reportes PDF',
+ description: 'NUEVO: Generación automática de reportes PDF para facturas y reportes de pacientes. Incluye vista previa rápida y soporte para múltiples reportes a la vez.',
+ features: [
+   'Generación automática de reportes PDF para facturas y reportes de pacientes',
+   'Vista previa rápida de reportes PDF',
+   'Soporte para múltiples reportes a la vez',
+   'Interfaz intuitiva para seleccionar reportes',
+  
+ ],
+ version: '2.1.2',
+ date: '2025-07-24',
+ priority: 'high',
+ ctaText: 'Entendido',
+ ctaUrl: ''
+  },
+  
 ];
 
 // Storage key for tracking viewed announcements
