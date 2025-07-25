@@ -1,4 +1,4 @@
-// src/components/billing/ReportForm.tsx - PROPERLY TYPED VERSION
+// src/components/billing/ReportForm.tsx - SIMPLE Tax Toggle (Client-side only)
 "use client";
 import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -24,7 +25,9 @@ import {
   Calculator,
   AlertCircle,
   Edit,
-  X,
+  Receipt,
+  Percent,
+  Info,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useBillingReport } from "@/hooks/useBilling";
@@ -96,6 +99,12 @@ export default function ReportForm({
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
+  // 🆕 NEW: Simple tax control (client-side only)
+  const [includeTax, setIncludeTax] = useState<boolean>(true);
+  const [customTaxRate, setCustomTaxRate] = useState<number>(
+    MEXICAN_TAX_RATE * 100
+  ); // Store as percentage
+
   // Load report data
   useEffect(() => {
     if (reportId) {
@@ -117,6 +126,23 @@ export default function ReportForm({
         setDiscount(report.discount || 0);
         setNotes(report.notes || "");
         setInternalNotes(report.internalNotes || "");
+
+        // 🆕 SIMPLE: Initialize tax settings from existing report
+        const currentSubtotal = (report.services || []).reduce(
+          (sum, service) => sum + (service.total || 0),
+          0
+        );
+
+        // If there's tax in the existing report, enable the checkbox
+        const hasTax = (report.tax || 0) > 0;
+        setIncludeTax(hasTax);
+
+        // Calculate the rate from existing data
+        if (hasTax && currentSubtotal > 0) {
+          const existingRate = ((report.tax || 0) / currentSubtotal) * 100;
+          setCustomTaxRate(Math.round(existingRate * 100) / 100);
+        }
+
         setHasChanges(false);
       } catch (error) {
         console.error("Error loading patient data:", error);
@@ -128,12 +154,16 @@ export default function ReportForm({
     }
   }, [report]);
 
-  // Calculate totals
+  // 🆕 SIMPLE: Calculate totals with client-side tax control
   const subtotal = services.reduce(
     (sum, service) => sum + (service.total || 0),
     0
   );
-  const tax = Math.round(subtotal * MEXICAN_TAX_RATE * 100) / 100;
+
+  const tax = includeTax
+    ? Math.round(subtotal * (customTaxRate / 100) * 100) / 100
+    : 0;
+
   const total = Math.round((subtotal + tax - (discount || 0)) * 100) / 100;
 
   const formatCurrency = (amount: number) => {
@@ -160,7 +190,6 @@ export default function ReportForm({
     setHasChanges(true);
   };
 
-  // 🔧 FIXED: Properly typed update function
   const handleUpdateService = (
     index: number,
     field: keyof BillingService,
@@ -199,7 +228,6 @@ export default function ReportForm({
         service.providedBy = String(value || "");
         break;
       default:
-        // For other fields, use type assertion
         (service as any)[field] = value;
         break;
     }
@@ -246,7 +274,49 @@ export default function ReportForm({
       return "El descuento no puede ser mayor al subtotal";
     }
 
+    if (includeTax && (customTaxRate < 0 || customTaxRate > 100)) {
+      return "La tasa de impuesto debe estar entre 0% y 100%";
+    }
+
     return null;
+  };
+
+  // 🆕 SIMPLE: Create a modified services array with calculated totals for saving
+  const createServicesForSaving = () => {
+    return services
+      .filter(
+        (service) => service.description?.trim() && (service.quantity || 0) > 0
+      )
+      .map((service) => {
+        const cleanService: BillingService = {
+          id: service.id || `service_${Date.now()}`,
+          description: service.description?.trim() || "",
+          quantity: Math.max(0, service.quantity || 0),
+          unitPrice: Math.max(0, service.unitPrice || 0),
+          total: Math.max(
+            0,
+            (service.quantity || 0) * (service.unitPrice || 0)
+          ),
+          category: service.category || "consultation",
+          providedBy: service.providedBy || userProfile?.uid || "",
+        };
+
+        // Only add optional fields if they have values
+        if (service.procedureCode?.trim()) {
+          cleanService.procedureCode = service.procedureCode.trim();
+        }
+
+        if (service.tooth && service.tooth.length > 0) {
+          const cleanTooth = service.tooth
+            .filter((t) => t?.trim())
+            .map((t) => t.trim());
+          if (cleanTooth.length > 0) {
+            cleanService.tooth = cleanTooth;
+          }
+        }
+
+        return cleanService;
+      });
   };
 
   const handleSave = async () => {
@@ -261,49 +331,22 @@ export default function ReportForm({
     try {
       setSaving(true);
 
-      // Clean services data before saving
-      const cleanServices: BillingService[] = services
-        .filter(
-          (service) =>
-            service.description?.trim() && (service.quantity || 0) > 0
-        )
-        .map((service) => {
-          const cleanService: BillingService = {
-            id: service.id || `service_${Date.now()}`,
-            description: service.description?.trim() || "",
-            quantity: Math.max(0, service.quantity || 0),
-            unitPrice: Math.max(0, service.unitPrice || 0),
-            total: Math.max(
-              0,
-              (service.quantity || 0) * (service.unitPrice || 0)
-            ),
-            category: service.category || "consultation",
-            providedBy: service.providedBy || userProfile.uid,
-          };
+      const cleanServices = createServicesForSaving();
 
-          // Only add optional fields if they have values
-          if (service.procedureCode?.trim()) {
-            cleanService.procedureCode = service.procedureCode.trim();
-          }
+      // 🆕 CLEAN: Pass the calculated tax directly to the backend
+      console.log("Frontend: Saving with tax configuration:", {
+        includeTax,
+        customTaxRate,
+        calculatedTax: tax,
+        discount,
+        total,
+        servicesCount: cleanServices.length,
+      });
 
-          if (service.tooth && service.tooth.length > 0) {
-            const cleanTooth = service.tooth
-              .filter((t) => t?.trim())
-              .map((t) => t.trim());
-            if (cleanTooth.length > 0) {
-              cleanService.tooth = cleanTooth;
-            }
-          }
+      // Pass: services, discount, customTax
+      await updateServices(cleanServices, discount || 0, tax);
 
-          return cleanService;
-        });
-
-      console.log("Saving clean services:", cleanServices);
-
-      // Save services and discount
-      await updateServices(cleanServices, Math.max(0, discount || 0));
-
-      // Save notes if changed - ensure we never pass undefined
+      // Save notes if changed
       const currentNotes = (notes || "").trim();
       const currentInternalNotes = (internalNotes || "").trim();
 
@@ -339,47 +382,21 @@ export default function ReportForm({
     try {
       setSaving(true);
 
-      // Clean services data before saving
-      const cleanServices: BillingService[] = services
-        .filter(
-          (service) =>
-            service.description?.trim() && (service.quantity || 0) > 0
-        )
-        .map((service) => {
-          const cleanService: BillingService = {
-            id: service.id || `service_${Date.now()}`,
-            description: service.description?.trim() || "",
-            quantity: Math.max(0, service.quantity || 0),
-            unitPrice: Math.max(0, service.unitPrice || 0),
-            total: Math.max(
-              0,
-              (service.quantity || 0) * (service.unitPrice || 0)
-            ),
-            category: service.category || "consultation",
-            providedBy: service.providedBy || userProfile.uid,
-          };
+      const cleanServices = createServicesForSaving();
 
-          // Only add optional fields if they have values
-          if (service.procedureCode?.trim()) {
-            cleanService.procedureCode = service.procedureCode.trim();
-          }
+      // 🆕 CLEAN: Same logic as handleSave
+      console.log("Frontend: Completing with tax configuration:", {
+        includeTax,
+        customTaxRate,
+        calculatedTax: tax,
+        discount,
+        total,
+      });
 
-          if (service.tooth && service.tooth.length > 0) {
-            const cleanTooth = service.tooth
-              .filter((t) => t?.trim())
-              .map((t) => t.trim());
-            if (cleanTooth.length > 0) {
-              cleanService.tooth = cleanTooth;
-            }
-          }
+      // Pass: services, discount, customTax
+      await updateServices(cleanServices, discount || 0, tax);
 
-          return cleanService;
-        });
-
-      // Save services and discount first
-      await updateServices(cleanServices, Math.max(0, discount || 0));
-
-      // Save notes - ensure we never pass undefined
+      // Save notes
       const currentNotes = (notes || "").trim();
       const currentInternalNotes = (internalNotes || "").trim();
 
@@ -390,7 +407,7 @@ export default function ReportForm({
         await updateNotes(currentNotes, currentInternalNotes);
       }
 
-      // Complete the report with cleaned notes
+      // Complete the report
       await completeReport(currentNotes);
 
       if (reportId) {
@@ -753,9 +770,89 @@ export default function ReportForm({
                   />
                 </div>
 
-                <div className="flex justify-between">
-                  <span>Impuestos (16%):</span>
-                  <span className="font-medium">{formatCurrency(tax)}</span>
+                {/* 🆕 SIMPLE: Tax Control Section */}
+                <div className="border rounded-lg p-3 bg-blue-50">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="include-tax"
+                        checked={includeTax}
+                        onCheckedChange={(checked: boolean) => {
+                          setIncludeTax(checked);
+                          setHasChanges(true);
+                        }}
+                      />
+                      <Label htmlFor="include-tax" className="font-medium">
+                        Incluir Impuestos
+                      </Label>
+                    </div>
+                    <Receipt className="h-4 w-4 text-blue-600" />
+                  </div>
+
+                  {includeTax && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="space-y-3"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <div className="flex-1">
+                          <Label htmlFor="tax-rate" className="text-sm">
+                            Tasa de Impuesto (%)
+                          </Label>
+                          <div className="flex items-center space-x-2 mt-1">
+                            <Input
+                              id="tax-rate"
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="0.01"
+                              value={customTaxRate}
+                              onChange={(e) => {
+                                setCustomTaxRate(
+                                  parseFloat(e.target.value) || 0
+                                );
+                                setHasChanges(true);
+                              }}
+                              className="text-sm"
+                            />
+                            <Percent className="h-4 w-4 text-gray-400" />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-sm">
+                        <span>IVA estándar (16%)</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setCustomTaxRate(MEXICAN_TAX_RATE * 100);
+                            setHasChanges(true);
+                          }}
+                          className="h-6 px-2 text-xs"
+                          disabled={customTaxRate === MEXICAN_TAX_RATE * 100}
+                        >
+                          Usar
+                        </Button>
+                      </div>
+
+                      <div className="flex justify-between text-sm border-t pt-2">
+                        <span>Cálculo del impuesto:</span>
+                        <span className="font-medium">
+                          {formatCurrency(tax)}
+                        </span>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {!includeTax && (
+                    <div className="text-center text-sm text-gray-600">
+                      Sin impuestos aplicados
+                    </div>
+                  )}
                 </div>
 
                 <Separator />
@@ -771,8 +868,85 @@ export default function ReportForm({
                   <p>
                     {services.length} servicio{services.length !== 1 ? "s" : ""}
                   </p>
+                  {includeTax && (
+                    <p className="text-xs text-blue-600 mt-1">
+                      Impuesto: {customTaxRate}% = {formatCurrency(tax)}
+                    </p>
+                  )}
+                  {!includeTax && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Sin impuestos aplicados
+                    </p>
+                  )}
                 </div>
               )}
+
+              {/* Tax Information Display */}
+              {subtotal > 0 && (
+                <div className="pt-3 border-t">
+                  <div className="text-xs text-gray-500 space-y-1">
+                    <div className="flex justify-between">
+                      <span>Base gravable:</span>
+                      <span>{formatCurrency(subtotal - (discount || 0))}</span>
+                    </div>
+                    {includeTax && (
+                      <>
+                        <div className="flex justify-between">
+                          <span>Tasa aplicada:</span>
+                          <span>{customTaxRate}%</span>
+                        </div>
+                        <div className="flex justify-between font-medium">
+                          <span>Impuesto calculado:</span>
+                          <span>{formatCurrency(tax)}</span>
+                        </div>
+                      </>
+                    )}
+                    {!includeTax && (
+                      <div className="flex justify-between text-gray-400">
+                        <span>Impuesto:</span>
+                        <span>Exento</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Tax Information Help */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center text-sm">
+                <Info className="h-4 w-4 mr-2" />
+                Información Fiscal
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs text-gray-600 space-y-2">
+              <div className="bg-blue-50 border border-blue-200 rounded p-2">
+                <h4 className="font-medium text-blue-800 mb-1">
+                  Configuración de Impuestos
+                </h4>
+                <p className="text-blue-700 mb-2">
+                  Usa el checkbox para incluir o excluir impuestos de este
+                  reporte. Puedes ajustar la tasa según el tipo de servicio.
+                </p>
+                <ul className="space-y-1 text-blue-700">
+                  <li>• IVA estándar en México: 16%</li>
+                  <li>• Consultas médicas: Generalmente exentas</li>
+                  <li>• Tratamientos estéticos: Gravados al 16%</li>
+                </ul>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded p-2">
+                <h4 className="font-medium text-amber-800 mb-1">
+                  ¿Cómo funciona?
+                </h4>
+                <p className="text-amber-700 text-xs">
+                  Los cálculos de impuestos se manejan al momento de guardar. El
+                  sistema ajustará automáticamente los totales para reflejar tu
+                  configuración de impuestos.
+                </p>
+              </div>
             </CardContent>
           </Card>
         </div>
