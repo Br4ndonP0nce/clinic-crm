@@ -85,7 +85,25 @@ export const FEATURE_ANNOUNCEMENTS: FeatureAnnouncement[] = [
  priority: 'high',
  ctaText: 'Entendido',
  ctaUrl: ''
-  },
+  },{
+  id: 'pdf-generation-api-fix',
+  title: 'FIX: Corrección del Sistema de Generación de PDFs',
+  description: 'Se corrigieron problemas críticos en la generación de PDFs del lado del servidor. El sistema ahora maneja correctamente los tipos de datos de Firebase y proporciona mejor validación y manejo de errores para una experiencia más confiable.',
+  features: [
+    'Corrección de tipos  para datos de Firebase Firestore',
+    'Manejo mejorado de Timestamps de Firebase a fechas JavaScript',
+    'Validación robusta de datos antes de generar PDFs',
+    'Mejor manejo de errores con mensajes informativos',
+    'Transformación segura de datos entre Firebase y interfaces TypeScript',
+    'Integración mejorada con Firebase Admin SDK',
+    'Fallbacks para campos opcionales y datos faltantes'
+  ],
+  version: '2.1.3',
+  date: '2025-07-25',
+  priority: 'high',
+  ctaText: 'Entendido',
+  ctaUrl: ''
+}
   
 ];
 
