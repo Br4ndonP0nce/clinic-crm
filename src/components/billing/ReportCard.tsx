@@ -1,4 +1,6 @@
+// Updated ReportCard.tsx - WITH NAVIGATION AND PDF LOADING
 import React, { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -7,6 +9,7 @@ import { ActionButtons } from "./core/ActionButtons";
 import { formatCurrency, formatDate } from "./core/BillingFormatters";
 import { BillingReport } from "@/types/billing";
 import { getPatient, getUser } from "@/lib/firebase/db";
+import { generateBillingPDF } from "@/lib/utils/pdf"; // 🆕 NEW IMPORT
 
 interface ReportCardProps {
   report: BillingReport;
@@ -19,9 +22,11 @@ interface ReportCardProps {
 
 export const ReportCard: React.FC<ReportCardProps> = React.memo(
   ({ report, onView, onEdit, onPDF, onDelete, canManage }) => {
+    const router = useRouter(); // 🆕 NEW
     const [patient, setPatient] = useState<any>(null);
     const [doctor, setDoctor] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [isPDFGenerating, setIsPDFGenerating] = useState(false); // 🆕 NEW
 
     // Memoize the report ID to prevent unnecessary re-renders
     const reportId = useMemo(
@@ -59,10 +64,35 @@ export const ReportCard: React.FC<ReportCardProps> = React.memo(
       };
     }, [report.patientId, report.doctorId]);
 
-    // Memoize handlers to prevent unnecessary re-renders
-    const handleView = useMemo(() => () => onView(report), [onView, report]);
+    // 🆕 UPDATED: Navigate to report detail page instead of modal
+    const handleView = useMemo(
+      () => () => {
+        router.push(`/admin/billing/report/${report.id}`);
+      },
+      [router, report.id]
+    );
+
     const handleEdit = useMemo(() => () => onEdit(report), [onEdit, report]);
-    const handlePDF = useMemo(() => () => onPDF(report), [onPDF, report]);
+
+    // 🆕 UPDATED: Enhanced PDF generation with loading state
+    const handlePDF = useMemo(
+      () => async () => {
+        if (!report.id || isPDFGenerating) return;
+
+        try {
+          setIsPDFGenerating(true);
+          await generateBillingPDF(report.id);
+          // Note: The generateBillingPDF function handles success/error toasts
+        } catch (error) {
+          console.error("Error generating PDF:", error);
+          // Error toast is handled by generateBillingPDF
+        } finally {
+          setIsPDFGenerating(false);
+        }
+      },
+      [report.id, isPDFGenerating]
+    );
+
     const handleDelete = useMemo(
       () => () => onDelete(report),
       [onDelete, report]
@@ -80,7 +110,7 @@ export const ReportCard: React.FC<ReportCardProps> = React.memo(
               <div className="flex items-center gap-3">
                 <StatusBadge status={report.status} type="billing" />
 
-                {/* Report Type Badge (NEW) */}
+                {/* Report Type Badge */}
                 {report.reportType && (
                   <Badge variant="outline" className="text-xs">
                     {report.reportType === "complete_visit"
@@ -109,6 +139,17 @@ export const ReportCard: React.FC<ReportCardProps> = React.memo(
                 {report.reportSequence && report.reportSequence > 1 && (
                   <Badge variant="outline" className="text-xs bg-blue-50">
                     #{report.reportSequence}
+                  </Badge>
+                )}
+
+                {/* 🆕 NEW: PDF Generating Indicator */}
+                {isPDFGenerating && (
+                  <Badge
+                    variant="outline"
+                    className="text-xs bg-blue-50 text-blue-700"
+                  >
+                    <div className="animate-spin rounded-full h-3 w-3 border-b border-current mr-1" />
+                    Generando PDF...
                   </Badge>
                 )}
               </div>
@@ -197,7 +238,7 @@ export const ReportCard: React.FC<ReportCardProps> = React.memo(
                 </div>
               )}
 
-              {/* Report Relationships (NEW) */}
+              {/* Report Relationships */}
               {report.parentReportId && (
                 <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
                   Relacionado con reporte padre
@@ -211,13 +252,15 @@ export const ReportCard: React.FC<ReportCardProps> = React.memo(
               )}
             </div>
 
-            {/* Actions */}
+            {/* 🆕 UPDATED: Actions with PDF loading state */}
             <div className="ml-4">
               <ActionButtons
                 onView={handleView}
                 onEdit={canManage ? handleEdit : undefined}
                 onPDF={
-                  ["completed", "paid"].includes(report.status)
+                  ["completed", "paid", "partially_paid"].includes(
+                    report.status
+                  )
                     ? handlePDF
                     : undefined
                 }
@@ -228,7 +271,10 @@ export const ReportCard: React.FC<ReportCardProps> = React.memo(
                 }
                 canEdit={canManage}
                 canDelete={canManage && report.status === "draft"}
-                showPDF={["completed", "paid"].includes(report.status)}
+                showPDF={["completed", "paid", "partially_paid"].includes(
+                  report.status
+                )}
+                isPDFGenerating={isPDFGenerating} // 🆕 NEW
               />
             </div>
           </div>
@@ -237,3 +283,5 @@ export const ReportCard: React.FC<ReportCardProps> = React.memo(
     );
   }
 );
+
+ReportCard.displayName = "ReportCard";

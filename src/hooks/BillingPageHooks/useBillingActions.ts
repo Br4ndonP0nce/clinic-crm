@@ -1,6 +1,7 @@
 // hooks/useBillingFilters.ts
 import { useState, useMemo } from 'react';
-
+import { generateBillingPDF } from '@/lib/utils/pdf';
+import { toast } from 'sonner';
 export interface DateFilter {
   start: Date;
   end: Date;
@@ -236,8 +237,23 @@ export const useBillingActions = ({
 
   // CRUD actions
   const handlePDF = useCallback(async (report: BillingReport) => {
-    console.log("Generating PDF for report:", report.id);
-    // TODO: Implement PDF generation
+    if (!report.id) {
+      toast.error('ID de reporte no válido');
+      return;
+    }
+
+    if (report.status === 'draft') {
+      toast.error('No se puede generar PDF de un reporte en borrador');
+      return;
+    }
+
+    try {
+      await generateBillingPDF(report.id);
+      // Success toast is handled by generateBillingPDF function
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      // Error toast is handled by generateBillingPDF function
+    }
   }, []);
 
   const handleDeleteReport = useCallback(async (report: BillingReport) => {

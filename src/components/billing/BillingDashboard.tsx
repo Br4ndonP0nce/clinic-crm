@@ -22,7 +22,7 @@ import {
   CheckCircle,
   FileText,
 } from "lucide-react";
-
+import { generateBillingPDF } from "@/lib/utils/pdf";
 // Import our new modular components
 
 import { LoadingState } from "./core/LoadingState";
