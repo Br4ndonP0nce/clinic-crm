@@ -6,6 +6,8 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { usePatientData } from "@/hooks/usePatientData";
 import { usePatientEditing } from "@/hooks/usePatientEditing";
+import { EvolutionNotesCard } from "@/components/patient/EvolutionNotesCard";
+import { toast } from "sonner";
 import {
   addAppointment,
   getAppointments,
@@ -315,7 +317,37 @@ export default function PatientDetailsPage() {
       },
     });
   };
+  const handleAddEvolutionNote = async (note: string) => {
+    try {
+      if (!patient || !userProfile) return;
 
+      const noteEntry = {
+        id: `note_${Date.now()}`,
+        note: note,
+        date: Timestamp.fromDate(new Date()),
+        doctorId: userProfile.uid,
+        doctorName: userProfile.displayName || userProfile.email,
+      };
+
+      // Get current evolution notes or initialize empty array
+      const currentNotes = (patient.dentalHistory as any)?.evolutionNotes || [];
+      const updatedNotes = [noteEntry, ...currentNotes];
+
+      // Update patient data with new evolution note
+      await updatePatientData({
+        dentalHistory: {
+          ...patient.dentalHistory,
+          evolutionNotes: updatedNotes,
+        },
+      });
+
+      // Refresh data to ensure consistency
+      await refreshData();
+    } catch (error) {
+      console.error("Error adding evolution note:", error);
+      throw error;
+    }
+  };
   // Helper functions
   const calculateAge = (dateOfBirth: Date) => {
     const today = new Date();
@@ -939,7 +971,7 @@ export default function PatientDetailsPage() {
               onRemoveFromArray={removeFromArray}
             />
 
-            {/* NEW: Clinical Findings / Accidents Card */}
+            {/* Clinical Findings / Accidents Card */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
@@ -1067,6 +1099,15 @@ export default function PatientDetailsPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* NEW: Evolution Notes Card */}
+            <EvolutionNotesCard
+              patient={patient}
+              canEdit={hasPermission("patients:write")}
+              doctors={doctors}
+              userProfile={userProfile}
+              onAddNote={handleAddEvolutionNote}
+            />
           </div>
         </TabsContent>
 
@@ -1187,6 +1228,13 @@ export default function PatientDetailsPage() {
               )}
             </CardContent>
           </Card>
+          <EvolutionNotesCard
+            patient={patient}
+            canEdit={hasPermission("patients:write")}
+            doctors={doctors}
+            userProfile={userProfile}
+            onAddNote={handleAddEvolutionNote}
+          />
         </TabsContent>
 
         {/* Treatments Tab */}

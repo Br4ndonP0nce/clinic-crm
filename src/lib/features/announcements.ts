@@ -103,6 +103,24 @@ export const FEATURE_ANNOUNCEMENTS: FeatureAnnouncement[] = [
   priority: 'high',
   ctaText: 'Entendido',
   ctaUrl: ''
+  },
+  {
+  id: 'evolution-notes-system',
+  title: 'NUEVO: Sistema de Notas de Evolución para Pacientes',
+  description: 'Los doctores ahora pueden registrar notas de evolución detalladas para cada paciente durante las visitas. El sistema incluye atribución automática del doctor, marcas de tiempo y una interfaz intuitiva para el seguimiento del progreso del paciente a lo largo del tiempo.',
+  features: [
+    'Registro de notas de evolución con atribución automática del doctor',
+    'Historial cronológico completo de todas las notas por paciente',
+    'Interfaz intuitiva con modal para agregar nuevas notas',
+    'Marcas de tiempo automáticas con fechas relativas ("Hoy", "Ayer")',
+    'Diseño responsivo con scroll automático para historiales largos',
+
+  ],
+  version: '2.1.4',
+  date: '2025-07-25',
+  priority: 'high',
+  ctaText: 'Genial!',
+  ctaUrl: ''
 }
   
 ];
