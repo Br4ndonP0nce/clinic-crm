@@ -16,7 +16,8 @@ type PatientSection =
   | 'dentalHistory' 
   | 'oralHygiene' 
   | 'dentalProblems'
-  | 'clinicalFindings'; // Added new section
+  | 'clinicalFindings' // Added new section
+  | 'evolutionNotes'; // Added evolution notes section
 
 interface UsePatientEditingReturn {
   // State

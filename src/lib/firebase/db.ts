@@ -81,6 +81,7 @@ export interface Patient {
     currentProblems: string[];
     painLevel?: number; // 1-10 scale
     clinicalFindings?: string[]; // NEW: Clinical findings and accidents
+    evolutionNotes?: EvolutionNote[]; // NEW: Evolution notes from doctors
   };
   
   // Patient Status (evolved from Lead status)
@@ -125,7 +126,13 @@ export interface Patient {
     dateSigned?: Timestamp;
   };
 }
-
+export interface EvolutionNote {
+  id: string;
+  note: string;
+  date: Timestamp;
+  doctorId: string;
+  doctorName: string;
+}
 export interface PatientStatusHistory {
   id: string;
   previousStatus: Patient['status'];
@@ -221,6 +228,7 @@ export const addPatient = async (patientData: Omit<Patient, 'id' | 'createdAt' |
       dentalHistory: {
         ...patientData.dentalHistory,
         clinicalFindings: patientData.dentalHistory.clinicalFindings || [], // Initialize if not present
+      evolutionNotes: patientData.dentalHistory.evolutionNotes || [], // Initialize evolution notes
       },
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -321,9 +329,14 @@ export const updatePatient = async (patientId: string, data: Partial<Patient>, p
       data.alternatePhone = '';
     }
     
-    // Ensure clinicalFindings exists in dentalHistory updates
-    if (data.dentalHistory && !data.dentalHistory.clinicalFindings) {
-      data.dentalHistory.clinicalFindings = [];
+    // Ensure dentalHistory fields exist
+    if (data.dentalHistory) {
+      if (!data.dentalHistory.clinicalFindings) {
+        data.dentalHistory.clinicalFindings = [];
+      }
+      if (!data.dentalHistory.evolutionNotes) {
+        data.dentalHistory.evolutionNotes = [];
+      }
     }
     
     await updateDoc(patientRef, {
@@ -340,19 +353,20 @@ export const updatePatient = async (patientId: string, data: Partial<Patient>, p
  * Get a single patient by ID
  */
 export const getPatient = async (patientId: string): Promise<Patient | null> => {
-  try {
+ try {
     const patientRef = doc(db, PATIENTS_COLLECTION, patientId);
     const patientSnap = await getDoc(patientRef);
     
     if (patientSnap.exists()) {
       const patientData = { id: patientSnap.id, ...patientSnap.data() } as Patient;
       
-      // Ensure clinicalFindings exists for backward compatibility
+      // Ensure backward compatibility
       if (!patientData.dentalHistory.clinicalFindings) {
         patientData.dentalHistory.clinicalFindings = [];
       }
-      
-      // Ensure alternatePhone is properly handled
+      if (!patientData.dentalHistory.evolutionNotes) {
+        patientData.dentalHistory.evolutionNotes = [];
+      }
       if (patientData.alternatePhone === undefined) {
         patientData.alternatePhone = '';
       }
